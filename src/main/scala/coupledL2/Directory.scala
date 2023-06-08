@@ -111,8 +111,8 @@ class Directory(implicit p: Parameters) extends L2Module with DontCareInnerLogic
   val metaWen = io.metaWReq.valid
   val replacerWen = RegInit(false.B)
 
-  val tagArray  = Module(new BankedSRAM(UInt(tagBits.W), sets, ways, banks, singlePort = true))
-  val metaArray = Module(new BankedSRAM(new MetaEntry, sets, ways, banks, singlePort = true))
+  val tagArray  = Module(new BankedSRAM(UInt(tagBits.W), sets, ways, banks, singlePort = true, enableClockGate = enableClockGate))
+  val metaArray = Module(new BankedSRAM(new MetaEntry, sets, ways, banks, singlePort = true, enableClockGate = enableClockGate))
   val tagRead = Wire(Vec(ways, UInt(tagBits.W)))
   val metaRead = Wire(Vec(ways, new MetaEntry()))
 
@@ -157,7 +157,7 @@ class Directory(implicit p: Parameters) extends L2Module with DontCareInnerLogic
   val repl = ReplacementPolicy.fromString(cacheParams.replacement, ways)
   val random_repl = cacheParams.replacement == "random"
   val replacer_sram_opt = if(random_repl) None else
-    Some(Module(new BankedSRAM(UInt(repl.nBits.W), sets, 1, banks, singlePort = true, shouldReset = true)))
+    Some(Module(new BankedSRAM(UInt(repl.nBits.W), sets, 1, banks, singlePort = true, shouldReset = true, enableClockGate = enableClockGate)))
 
   val repl_state = if(random_repl){
     when(io.tagWReq.fire){

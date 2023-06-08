@@ -87,6 +87,7 @@ case class L2Param
   clientCaches: Seq[L1Param] = Nil,
   replacement: String = "plru",
   mshrs: Int = 16,
+  enableClockGate: Boolean = true,
   releaseData: Int = 3,
   /* 0 for dirty alone
    * 1 for dirty and accessed

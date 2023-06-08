@@ -52,7 +52,8 @@ class DataStorage(implicit p: Parameters) extends L2Module with DontCareInnerLog
     set = blocks,
     way = 1,
     singlePort = true,
-    hasMbist = false
+    hasMbist = false,
+    hasClkGate = enableClockGate
   ))
 
   array.io.r <> DontCare

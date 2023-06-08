@@ -17,7 +17,7 @@
 
 package coupledL2.prefetch
 
-import utility.SRAMTemplate
+import xs.utils.sram.SRAMTemplate
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
@@ -134,7 +134,7 @@ class RecentRequestTable(implicit p: Parameters) extends BOPModule {
   }
 
   val rrTable = Module(
-    new SRAMTemplate(rrTableEntry(), set = rrTableEntries, way = 1, shouldReset = true, singlePort = true)
+    new SRAMTemplate(rrTableEntry(), set = rrTableEntries, way = 1, shouldReset = true, singlePort = true, hasMbist = false, hasClkGate = false)
   )
 
   val wAddr = io.w.bits
