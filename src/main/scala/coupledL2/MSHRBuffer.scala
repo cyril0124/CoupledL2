@@ -22,6 +22,7 @@ import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
 import coupledL2.utils._
 import java.util.ResourceBundle
+import xs.utils.sram._
 
 // read with block granularity
 class MSHRBufRead(implicit p: Parameters) extends L2Bundle {
@@ -50,7 +51,7 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L2Module {
 
   val buffer = Seq.fill(mshrsAll) {
     Seq.fill(beatSize) {
-      Module(new SRAMTemplate(new DSBeat(), set = 1, way = 1, singlePort = true))
+      Module(new SRAMTemplate(new DSBeat(), set = 1, way = 1, singlePort = true, hasMbist = false, hasClkGate = false))
     }
   }
   val valids = RegInit(VecInit(Seq.fill(mshrsAll) {

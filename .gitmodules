@@ -7,3 +7,6 @@
 [submodule "HuanCun"]
 	path = HuanCun
 	url = https://github.com/OpenXiangShan/HuanCun.git
+[submodule "xs-utils"]
+	path = xs-utils
+	url = https://github.com/Siudya/xs-utils.git

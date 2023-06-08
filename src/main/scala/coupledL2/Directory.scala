@@ -24,6 +24,7 @@ import coupledL2.utils._
 import utility.ParallelPriorityMux
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.tilelink.TLMessages
+import xs.utils.sram._
 
 class MetaEntry(implicit p: Parameters) extends L2Bundle {
   val dirty = Bool()

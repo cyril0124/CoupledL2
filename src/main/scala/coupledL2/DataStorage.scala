@@ -19,7 +19,8 @@ package coupledL2
 
 import chisel3._
 import chisel3.util._
-import coupledL2.utils.SRAMTemplate
+// import coupledL2.utils.SRAMTemplate
+import xs.utils.sram.SRAMTemplate
 import utility.RegNextN
 import chipsalliance.rocketchip.config.Parameters
 
@@ -50,7 +51,8 @@ class DataStorage(implicit p: Parameters) extends L2Module with DontCareInnerLog
     gen = new DSBlock,
     set = blocks,
     way = 1,
-    singlePort = true 
+    singlePort = true,
+    hasMbist = false
   ))
 
   array.io.r <> DontCare
