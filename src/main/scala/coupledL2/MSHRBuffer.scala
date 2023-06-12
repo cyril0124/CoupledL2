@@ -30,6 +30,7 @@ class MSHRBufRead(implicit p: Parameters) extends L2Bundle {
   val id = Input(UInt(mshrBits.W))
   val ready = Output(Bool())
   val data = Output(new DSBlock)
+  val corrupt = Output(Bool())
 }
 
 // write with beat granularity
@@ -38,6 +39,7 @@ class MSHRBufWrite(implicit p: Parameters) extends L2Bundle {
   val beat_sel = Input(UInt(beatSize.W))
   val data = Input(new DSBlock)
   val id = Input(UInt(mshrBits.W))
+  val corrupt = Input(Bool())
   val ready = Output(Bool())
 }
 
@@ -57,6 +59,9 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L2Module {
   val valids = RegInit(VecInit(Seq.fill(mshrsAll) {
     VecInit(Seq.fill(beatSize)(false.B))
   }))
+  val corrupts = RegInit(VecInit(Seq.fill(mshrsAll) {
+    VecInit(Seq.fill(beatSize)(false.B))
+  }))
 
   io.w.foreach {
     case w =>
@@ -74,6 +79,15 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L2Module {
 
     // assert(valids(io.r.id).asUInt.andR, "[%d] attempt to read an invalid entry", io.r.id)
     valids(io.r.id).foreach(_ := false.B)
+    if(dataEccEnable) {
+      corrupts.zipWithIndex.foreach{ case(beats, i) => 
+        require(beats.getWidth == beatSize, s"${beats.getWidth} =/= ${beatSize}")
+        
+        when(io.r.id === i.U) {
+          beats.asTypeOf(Vec(beatSize, Bool())).foreach( _ := false.B ) 
+        }
+      }
+    }
   }
 
   buffer.zipWithIndex.foreach {
@@ -83,6 +97,7 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L2Module {
 
       val w_beat_sel = PriorityMux(wens, io.w.map(_.beat_sel))
       val w_data = PriorityMux(wens, io.w.map(_.data))
+      val w_corrupt = PriorityMux(wens, io.w.map(_.corrupt))
       val ren = io.r.valid && io.r.id === i.U
       block.zipWithIndex.foreach {
         case (entry, j) =>
@@ -94,6 +109,8 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L2Module {
           )
           entry.io.r.req.valid := ren
           entry.io.r.req.bits.apply(0.U)
+
+          if(dataEccEnable) corrupts(i)(j) := w_corrupt
       }
   }
 
@@ -104,4 +121,10 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L2Module {
   io.r.data.data := VecInit(buffer.map {
     case block => VecInit(block.map(_.io.r.resp.data.asUInt)).asUInt
   })(ridReg)
+  
+  if(dataEccEnable) {
+    io.r.corrupt := VecInit( corrupts.map( entry => entry.reduce(_ || _) ) )(ridReg)
+  } else {
+    io.r.corrupt := false.B
+  }
 }

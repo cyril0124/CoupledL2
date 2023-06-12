@@ -54,6 +54,9 @@ trait HasCoupledL2Parameters {
 
   val enableClockGate = cacheParams.enableClockGate
 
+  val dataEccCode = cacheParams.dataEccCode
+  val dataEccEnable = dataEccCode != None && dataEccCode != Some("none")
+
   // 1 cycle for sram read, and latch for another cycle
   val sramLatency = 2
 

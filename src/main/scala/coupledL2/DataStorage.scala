@@ -21,8 +21,12 @@ import chisel3._
 import chisel3.util._
 // import coupledL2.utils.SRAMTemplate
 import xs.utils.sram.SRAMTemplate
+import xs.utils.Code
 import utility.RegNextN
 import chipsalliance.rocketchip.config.Parameters
+import firrtl.Utils
+import xs.utils.Decoding
+import java.awt.image.DataBuffer
 
 class DSRequest(implicit p: Parameters) extends L2Bundle {
   val way = UInt(wayBits.W)
@@ -45,7 +49,31 @@ class DataStorage(implicit p: Parameters) extends L2Module with DontCareInnerLog
     val req = Flipped(ValidIO(new DSRequest))
     val rdata = Output(new DSBlock)
     val wdata = Input(new DSBlock)
+    val error = Output(Bool())
   })
+
+  // Seperate the whole block of data into several banks, each bank contains 8 bytes(64-bit).
+  // For every bank, we attach ECC protection bits.
+  require(blockBytes % 8 == 0)
+  val bankBytes = 8
+  val banks = blockBytes / bankBytes // 64 / 8 = 8
+
+  def dataCode: Code = Code.fromString(dataEccCode)
+  val dataEccBits = dataCode.width(bankBytes * 8) - bankBytes * 8
+  println(s"Data ECC bits:$dataEccBits")
+
+  val dataEccArray = if (dataEccBits > 0) {
+    Some(
+      Module(new SRAMTemplate(
+        gen = Vec(banks, UInt((dataEccBits).W)), 
+        set = blocks,
+        singlePort = true,
+        hasMbist = false,
+        hasClkGate = enableClockGate
+      ))
+    )
+  } else None
+
 
   val array = Module(new SRAMTemplate(
     gen = new DSBlock,
@@ -65,5 +93,50 @@ class DataStorage(implicit p: Parameters) extends L2Module with DontCareInnerLog
   array.io.w.apply(wen, io.wdata, arrayIdx, 1.U)
   array.io.r.apply(ren, arrayIdx)
 
-  io.rdata := RegNextN(array.io.r.resp.data(0), sramLatency - 1)
+  // io.rdata := RegNextN(array.io.r.resp.data(0), sramLatency - 1)
+
+  if (dataEccBits > 0) {
+    val bankWrDataVec = io.wdata.asTypeOf(Vec(banks, UInt((bankBytes*8).W)))
+    
+    val dataEccRdData = Wire(Vec(banks, UInt((dataEccBits).W)))
+    val dataEccWrData = Cat( (0 until banks).map{ bank => 
+                                val t = dataCode.encode(bankWrDataVec(bank))
+                                require(t.asUInt.getWidth == (dataEccBits + bankBytes * 8))
+                                t.head(dataEccBits)
+                              }.reverse
+                            ).asTypeOf( Vec(banks, UInt((dataEccBits).W)) )
+    dataEccArray.get.io.w.apply(wen, dataEccWrData, arrayIdx, 1.U)
+    dataEccArray.get.io.r.apply(ren, arrayIdx)
+
+    // We have only one way
+    dataEccRdData := RegNextN(dataEccArray.get.io.r.resp.data(0), sramLatency - 1).asTypeOf(Vec(banks, UInt((dataEccBits).W)))
+
+    val rdDataRaw = RegNextN(array.io.r.resp.data(0), sramLatency - 1) // DSBlock
+    val rdData = rdDataRaw.data.asTypeOf(Vec(banks, UInt((bankBytes*8).W)))
+    val dataEccErrVec = dataEccRdData.zip(rdData).map{ case(e, d) => 
+                            dataCode.decode(e ## d).error
+                        }
+    val dataEccCorrVec = dataEccRdData.zip(rdData).map{ case(e, d) => 
+                                    dataCode.decode(e ## d).correctable
+                          }
+    val corrDataVec = dataEccRdData.zip(rdData).map{ case(e, d) => 
+                          dataCode.decode(e ## d).corrected
+                      }
+    require(Cat(corrDataVec).asUInt.getWidth == rdDataRaw.data.asUInt.getWidth, s"${Cat(corrDataVec).asUInt.getWidth} =/= ${rdDataRaw.data.asUInt.getWidth}")
+    val rdDataAfterEcc = rdData.zipWithIndex.map{ case(rdata, i) =>
+                            Mux(dataEccCorrVec(i), corrDataVec(i), rdata)
+                        }
+    
+    def toDSBlock(x: Seq[UInt]): DSBlock = {
+      val dsBlock = Wire(new DSBlock)
+      dsBlock.data := Cat(x.reverse)
+      dsBlock
+    }
+
+    io.error := Cat(Cat(dataEccErrVec) & ~Cat(dataEccCorrVec)).orR
+    io.rdata := Mux(io.error, toDSBlock(rdDataAfterEcc), rdDataRaw)
+  } else {
+    io.error := false.B
+    io.rdata := RegNextN(array.io.r.resp.data(0), sramLatency - 1)
+  }
 }

@@ -140,6 +140,7 @@ class SinkC(implicit p: Parameters) extends L2Module {
   io.releaseBufWrite.beat_sel := UIntToOH(beat)
   io.releaseBufWrite.data.data := Fill(beatSize, io.c.bits.data)
   io.releaseBufWrite.id := DontCare // id is given by MSHRCtl by comparing address to the MSHRs
+  io.releaseBufWrite.corrupt := false.B
 
   // io.c.ready := !first || !noSpace && !(isRelease && !io.toReqArb.ready)
   io.c.ready := !isRelease || !first || !full || !hasData && io.toReqArb.ready

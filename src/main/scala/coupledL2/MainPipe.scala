@@ -73,6 +73,7 @@ class MainPipe(implicit p: Parameters) extends L2Module {
     val toDS = new Bundle() {
       val req_s3 = ValidIO(new DSRequest)
       val rdata_s5 = Input(new DSBlock)
+      val error_s5 = Input(Bool())
       val wdata_s3 = Output(new DSBlock)
     }
 
@@ -461,6 +462,7 @@ class MainPipe(implicit p: Parameters) extends L2Module {
     isD_s5 := isD_s4
   }
   val rdata_s5 = io.toDS.rdata_s5.data
+  task_s5.bits.corrupt := Mux(ren_s5, io.toDS.error_s5, false.B)
   val merged_data_s5 = Mux(ren_s5, rdata_s5, data_s5)
   val chnl_fire_s5 = c_s5.fire() || d_s5.fire()
 
@@ -490,12 +492,14 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   io.releaseBufWrite.beat_sel   := Fill(beatSize, 1.U(1.W))
   io.releaseBufWrite.data.data  := merged_data_s5
   io.releaseBufWrite.id         := task_s5.bits.mshrId
+  io.releaseBufWrite.corrupt    := task_s5.bits.corrupt
   assert(!(io.releaseBufWrite.valid && !io.releaseBufWrite.ready), "releaseBuf should be ready when given valid")
 
   io.refillBufWrite.valid     := task_s5.valid && need_write_refillBuf_s5
   io.refillBufWrite.beat_sel  := Fill(beatSize, 1.U(1.W))
   io.refillBufWrite.data.data := merged_data_s5
   io.refillBufWrite.id        := task_s5.bits.mshrId
+  io.refillBufWrite.corrupt   := task_s5.bits.corrupt
   assert(!(io.refillBufWrite.valid && !io.refillBufWrite.ready), "releaseBuf should be ready when given valid")
 
   c_s5.valid := task_s5.valid && isC_s5 && !need_write_releaseBuf_s5 && !need_write_refillBuf_s5
