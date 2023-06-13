@@ -166,7 +166,8 @@ class GrantBufferFIFO(implicit p: Parameters) extends BaseGrantBuffer with HasCi
     d.denied := false.B
     d.data := data
     // d.corrupt := false.B
-    d.corrupt := task.corrupt
+    d.denied := task.denied
+    d.corrupt := task.denied || task.corrupt
     d
   }
 

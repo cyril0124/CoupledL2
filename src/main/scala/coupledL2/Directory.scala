@@ -25,6 +25,7 @@ import utility.ParallelPriorityMux
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.tilelink.TLMessages
 import xs.utils.sram._
+import xs.utils.Code
 
 class MetaEntry(implicit p: Parameters) extends L2Bundle {
   val dirty = Bool()
@@ -111,10 +112,16 @@ class Directory(implicit p: Parameters) extends L2Module with DontCareInnerLogic
   val metaWen = io.metaWReq.valid
   val replacerWen = RegInit(false.B)
 
+  def tagCode: Code = Code.fromString(tagEccCode)
+  val tagEccBits = tagCode.width(tagBits) - tagBits
+  println(s"Tag ECC bits:$tagEccBits")
+
   val tagArray  = Module(new BankedSRAM(UInt(tagBits.W), sets, ways, banks, singlePort = true, enableClockGate = enableClockGate))
   val metaArray = Module(new BankedSRAM(new MetaEntry, sets, ways, banks, singlePort = true, enableClockGate = enableClockGate))
+  val tagEccArray = Module(new BankedSRAM(UInt(tagEccBits.W), sets, ways, banks, singlePort = true, enableClockGate = false))
   val tagRead = Wire(Vec(ways, UInt(tagBits.W)))
   val metaRead = Wire(Vec(ways, new MetaEntry()))
+  val tagEccRead = Wire(Vec(ways, UInt(tagEccBits.W)))
 
   val reqValidReg = RegNext(io.read.fire, false.B)
   val resetFinish = RegInit(false.B)
@@ -143,6 +150,16 @@ class Directory(implicit p: Parameters) extends L2Module with DontCareInnerLogic
     io.metaWReq.bits.wayOH
   )
 
+  // TagEcc R/W
+  tagEccRead := tagEccArray.io.r(io.read.fire, io.read.bits.set).resp.data
+  tagEccArray.io.w(
+    tagWen,
+    tagCode.encode(io.tagWReq.bits.wtag).head(tagEccBits),
+    io.tagWReq.bits.set,
+    UIntToOH(io.tagWReq.bits.way)
+  )
+
+  
   // Generate response signals
   /* stage 1: io.read.fire, access Tag/Meta
      stage 2: get Tag/Meta, calculate hit/way
@@ -152,6 +169,7 @@ class Directory(implicit p: Parameters) extends L2Module with DontCareInnerLogic
   val reqReg = RegEnable(io.read.bits, 0.U.asTypeOf(io.read.bits), enable = io.read.fire)
   val hit_s2 = Wire(Bool())
   val way_s2 = Wire(UInt(wayBits.W))
+  val err_s2 = WireInit(VecInit(Seq.fill(ways)(false.B)))
 
   // Replacer
   val repl = ReplacementPolicy.fromString(cacheParams.replacement, ways)
@@ -242,6 +260,9 @@ class Directory(implicit p: Parameters) extends L2Module with DontCareInnerLogic
 
   hit_s2 := Cat(hitVec).orR
   way_s2 := Mux(hit_s2, hitWay, finalWay)
+  err_s2 := VecInit(tagEccRead.zip(tagRead).map{ case(ecc, tag) => 
+                    tagCode.decode(ecc ## tag).error
+                })
 
   val hit_s3 = RegEnable(hit_s2, false.B, reqValidReg)
   val way_s3 = RegEnable(way_s2, 0.U, reqValidReg)
@@ -251,13 +272,19 @@ class Directory(implicit p: Parameters) extends L2Module with DontCareInnerLogic
   val tag_s3 = tagAll_s3(way_s3)
   val set_s3 = RegEnable(reqReg.set, reqValidReg)
   val replacerInfo_s3 = RegEnable(reqReg.replacerInfo, reqValidReg)
+  val err_s3 = RegEnable(err_s2, reqValidReg)
 
   io.resp.hit   := hit_s3
   io.resp.way   := way_s3
   io.resp.meta  := meta_s3
   io.resp.tag   := tag_s3
   io.resp.set   := set_s3
-  io.resp.error := false.B  // depends on ECC
+  // io.resp.error := false.B  // depends on ECC
+  if (tagEccBits > 0) {
+    io.resp.error := io.resp.hit && err_s3(way_s3)
+  } else {
+    io.resp.error := false.B
+  }
   io.resp.replacerInfo := replacerInfo_s3
 
   dontTouch(io)

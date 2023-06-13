@@ -52,7 +52,8 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {
   val sourceId = UInt(sourceIdBits.W)     // tilelink sourceID
   val bufIdx = UInt(bufIdxBits.W)         // idx of SinkC buffer
   val needProbeAckData = Bool()           // only used for SinkB reqs
-  val corrupt = Bool()                    // corrupt data checked by ECC in DataStorage
+  val denied = Bool()                     // the slave cannot handle the request (ECC)
+  val corrupt = Bool()                    // corrupt data checked by ECC in DataStorage (ECC)
 
   // val mshrOpType = UInt(mshrOpTypeBits.W) // type of the MSHR task operation
   // MSHR may send Release(Data) or Grant(Data) or ProbeAck(Data) through Main Pipe

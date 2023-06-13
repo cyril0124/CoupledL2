@@ -89,6 +89,7 @@ case class L2Param
   mshrs: Int = 16,
   enableClockGate: Boolean = true,
   dataEccCode: Option[String] = Some("secded"), // Option: "none", "identity", "parity", "sec", "secded"
+  tagEccCode: Option[String] = Some("secded"),
   releaseData: Int = 3,
   /* 0 for dirty alone
    * 1 for dirty and accessed

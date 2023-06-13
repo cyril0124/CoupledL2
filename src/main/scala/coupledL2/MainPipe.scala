@@ -136,6 +136,7 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   /* ======== Enchantment ======== */
   val dirResult_s3    = io.dirResp_s3
   val meta_s3         = dirResult_s3.meta
+  val meta_error_s3   = dirResult_s3.error
   val req_s3          = task_s3.bits
 
   val mshr_req_s3     = req_s3.mshrTask
@@ -188,7 +189,7 @@ class MainPipe(implicit p: Parameters) extends L2Module {
     meta_has_clients_s3
 
   // For channel C reqs, Release will always hit on MainPipe, no need for MSHR
-  val need_mshr_s3 = need_mshr_s3_a || need_mshr_s3_b
+  val need_mshr_s3 = ( need_mshr_s3_a || need_mshr_s3_b ) && !meta_error_s3
 
   /* Signals to MSHR Ctl */
   // Allocation of MSHR: new request only
@@ -227,47 +228,69 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   sink_resp_s3.bits := task_s3.bits
   sink_resp_s3.bits.mshrId := (1 << (mshrBits-1)).U + sink_resp_s3.bits.sourceId // extra id for reqs that do not enter mshr
 
-  when(req_s3.fromA) {
-    when(mainpipe_release){ // replacement-Release for A-miss
-      sink_resp_s3.bits.opcode := {
-        cacheParams.releaseData match {
-          case 0 => Mux(meta_s3.dirty, ReleaseData, Release)
-          case 1 => Mux(meta_s3.dirty && meta_s3.accessed, ReleaseData, Release)
-          case 2 => ReleaseData
-          case 3 => ReleaseData
-        }
-      }
-      sink_resp_s3.bits.param  := Mux(isT(meta_s3.state), TtoN, BtoN)
-      // sink_resp_s3.bits.mshrId is changed to mshr_alloc_ptr at stage 4
-      // so source of C-Release is correct
-      sink_resp_s3.bits.tag    := dirResult_s3.tag
-      sink_resp_s3.bits.dirty  := meta_s3.dirty
-
-    }.otherwise { // Grant for A-hit
+  when(meta_error_s3) {
+    when(req_s3.fromA) {
+      // Sink resp for channel d
       sink_resp_s3.bits.opcode := odOpGen(req_s3.opcode)
       sink_resp_s3.bits.param  := Mux(
-        req_acquire_s3,
-        Mux(req_s3.param === NtoB && !sink_resp_s3_a_promoteT, toB, toT),
-        0.U // reserved
-      )
+          req_acquire_s3,
+          Mux(req_s3.param === NtoB && !sink_resp_s3_a_promoteT, toB, toT),
+          0.U // reserved
+        )
+      sink_resp_s3.bits.denied := true.B
+    }.elsewhen(req_s3.fromB) {
+      // Sink resp for channel c
+      sink_resp_s3.bits.opcode := ProbeAck
+      sink_resp_s3.bits.corrupt := true.B // channel c does not have denied field so we use corrupt for tag error condition
+    }.otherwise { // req_s3.fromC
+      // Sink resp for channel d
+      sink_resp_s3.bits.opcode := ReleaseAck
+      sink_resp_s3.bits.param  := 0.U // param of ReleaseAck must be 0
+      sink_resp_s3.bits.denied := true.B
     }
-  }.elsewhen(req_s3.fromB) {
-    sink_resp_s3.bits.opcode := Mux(
-      dirResult_s3.hit && (meta_s3.state === TIP && meta_s3.dirty || req_s3.needProbeAckData),
-      ProbeAckData,
-      ProbeAck
-    )
-    sink_resp_s3.bits.param  := Mux(!dirResult_s3.hit, NtoN,
-      MuxLookup(Cat(req_s3.param, meta_s3.state), BtoB, Seq(
-        Cat(toN, BRANCH) -> BtoN,
-        Cat(toN, TIP)    -> TtoN,
-        Cat(toB, TIP)    -> TtoB,
-        Cat(toT, TIP)    -> TtoT
-      )) // other combinations should miss or have mshr allocated
-    )
-  }.otherwise { // req_s3.fromC
-    sink_resp_s3.bits.opcode := ReleaseAck
-    sink_resp_s3.bits.param  := 0.U // param of ReleaseAck must be 0
+  }.otherwise {
+    when(req_s3.fromA) {
+      when(mainpipe_release){ // replacement-Release for A-miss
+        sink_resp_s3.bits.opcode := {
+          cacheParams.releaseData match {
+            case 0 => Mux(meta_s3.dirty, ReleaseData, Release)
+            case 1 => Mux(meta_s3.dirty && meta_s3.accessed, ReleaseData, Release)
+            case 2 => ReleaseData
+            case 3 => ReleaseData
+          }
+        }
+        sink_resp_s3.bits.param  := Mux(isT(meta_s3.state), TtoN, BtoN)
+        // sink_resp_s3.bits.mshrId is changed to mshr_alloc_ptr at stage 4
+        // so source of C-Release is correct
+        sink_resp_s3.bits.tag    := dirResult_s3.tag
+        sink_resp_s3.bits.dirty  := meta_s3.dirty
+
+      }.otherwise { // Grant for A-hit
+        sink_resp_s3.bits.opcode := odOpGen(req_s3.opcode)
+        sink_resp_s3.bits.param  := Mux(
+          req_acquire_s3,
+          Mux(req_s3.param === NtoB && !sink_resp_s3_a_promoteT, toB, toT),
+          0.U // reserved
+        )
+      }
+    }.elsewhen(req_s3.fromB) {
+      sink_resp_s3.bits.opcode := Mux(
+        dirResult_s3.hit && (meta_s3.state === TIP && meta_s3.dirty || req_s3.needProbeAckData),
+        ProbeAckData,
+        ProbeAck
+      )
+      sink_resp_s3.bits.param  := Mux(!dirResult_s3.hit, NtoN,
+        MuxLookup(Cat(req_s3.param, meta_s3.state), BtoB, Seq(
+          Cat(toN, BRANCH) -> BtoN,
+          Cat(toN, TIP)    -> TtoN,
+          Cat(toB, TIP)    -> TtoB,
+          Cat(toT, TIP)    -> TtoT
+        )) // other combinations should miss or have mshr allocated
+      )
+    }.otherwise { // req_s3.fromC
+      sink_resp_s3.bits.opcode := ReleaseAck
+      sink_resp_s3.bits.param  := 0.U // param of ReleaseAck must be 0
+    }
   }
 
   val source_req_s3 = Wire(new TaskBundle)
