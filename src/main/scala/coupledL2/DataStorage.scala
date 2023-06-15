@@ -123,9 +123,6 @@ class DataStorage(implicit p: Parameters) extends L2Module with DontCareInnerLog
                           dataCode.decode(e ## d).corrected
                       }
     require(Cat(corrDataVec).asUInt.getWidth == rdDataRaw.data.asUInt.getWidth, s"${Cat(corrDataVec).asUInt.getWidth} =/= ${rdDataRaw.data.asUInt.getWidth}")
-    val rdDataAfterEcc = rdData.zipWithIndex.map{ case(rdata, i) =>
-                            Mux(dataEccCorrVec(i), corrDataVec(i), rdata)
-                        }
     
     def toDSBlock(x: Seq[UInt]): DSBlock = {
       val dsBlock = Wire(new DSBlock)
@@ -134,7 +131,7 @@ class DataStorage(implicit p: Parameters) extends L2Module with DontCareInnerLog
     }
 
     io.error := Cat(Cat(dataEccErrVec) & ~Cat(dataEccCorrVec)).orR
-    io.rdata := Mux(io.error, toDSBlock(rdDataAfterEcc), rdDataRaw)
+    io.rdata := toDSBlock(corrDataVec)
   } else {
     io.error := false.B
     io.rdata := RegNextN(array.io.r.resp.data(0), sramLatency - 1)
