@@ -136,4 +136,6 @@ class DataStorage(implicit p: Parameters) extends L2Module with DontCareInnerLog
     io.error := false.B
     io.rdata := RegNextN(array.io.r.resp.data(0), sramLatency - 1)
   }
+
+  assert(RegNext(!io.error), "For now, we won't ECC error happen in DataStorage...")
 }

@@ -285,6 +285,7 @@ class Directory(implicit p: Parameters) extends L2Module with DontCareInnerLogic
   } else {
     io.resp.error := false.B
   }
+  assert(RegNext(!io.resp.error), "For now, we won't ECC error happen in Directory...")
   io.resp.replacerInfo := replacerInfo_s3
 
   dontTouch(io)
