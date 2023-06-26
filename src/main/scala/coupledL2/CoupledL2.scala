@@ -90,6 +90,9 @@ trait HasCoupledL2Parameters {
   // id of 1XXXX refers to reqs that do not enter mshr
   // require(isPow2(idsAll))
 
+  val lookupBufEntries = 16
+  val lookupBufBits = log2Up(lookupBufEntries)
+
   // width params with bank idx (used in prefetcher / ctrl unit)
   lazy val fullAddressBits = edgeOut.bundle.addressBits
   lazy val fullTagBits = fullAddressBits - setBits - offsetBits

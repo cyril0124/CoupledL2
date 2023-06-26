@@ -31,10 +31,16 @@ class SinkA(implicit p: Parameters) extends L2Module {
     val a = Flipped(DecoupledIO(new TLBundleA(edgeIn.bundle)))
     val prefetchReq = prefetchOpt.map(_ => Flipped(DecoupledIO(new PrefetchReq)))
     val toReqArb = DecoupledIO(new TaskBundle)
+
     val pbRead = Flipped(ValidIO(new PutBufferRead))
     val pbResp = Output(Vec(beatSize, new PutBufferEntry))
+
     val fromMainPipe = Input(new Bundle{
       val putReqGood_s3 = Bool() // PutFullData / PutPartialData hit and do not need to allcate a MSHR
+    })
+
+    val fromPutDataBuf = Input(new Bundle{
+      val full = Bool()
     })
   })
 
@@ -148,7 +154,7 @@ class SinkA(implicit p: Parameters) extends L2Module {
   val prefetchReq = prefetchOpt.map(_ => Wire(io.toReqArb.cloneType))
 
   s1_ready := commonReq.ready
-  io.a.ready := !first_1 || s0_ready && hasData || commonReq.ready && !hasData && !s0_full
+  io.a.ready := !first_1 || s0_ready && hasData && !io.fromPutDataBuf.full || commonReq.ready && !hasData && !s0_full
 
 
   val putValid = s0_valid && s0_hasData && s0_full

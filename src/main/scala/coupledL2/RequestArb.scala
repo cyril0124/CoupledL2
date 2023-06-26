@@ -52,6 +52,9 @@ class RequestArb(implicit p: Parameters) extends L2Module {
     val refillBufRead_s2 = Flipped(new MSHRBufRead)
     val releaseBufRead_s2 = Flipped(new MSHRBufRead)
 
+    /* send lookupBuf read request for PutPartialData */
+    val putDataBufRead_s2 = Flipped(new LookupBufRead)
+
     /* status of each pipeline stage */
     val status_s1 = Output(new PipeEntranceStatus) // set & tag of entrance status
     val status_vec = Vec(2, ValidIO(new PipeStatus)) // whether this stage will flow into SourceD
@@ -181,6 +184,10 @@ class RequestArb(implicit p: Parameters) extends L2Module {
   io.releaseBufRead_s2.id := task_s2.bits.mshrId
   assert(!io.refillBufRead_s2.valid || io.refillBufRead_s2.ready)
   assert(!io.releaseBufRead_s2.valid || io.releaseBufRead_s2.ready)
+
+  // For PutPartialData, read putDataBuffer
+  io.putDataBufRead_s2.valid := mshrTask_s2 && task_s2.bits.opcode === PutPartialData && task_s2.bits.fromA
+  io.putDataBufRead_s2.id := task_s2.bits.reqSource
 
   require(beatSize == 2)
 

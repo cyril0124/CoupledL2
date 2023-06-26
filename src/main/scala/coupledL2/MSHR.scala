@@ -120,7 +120,8 @@ class MSHR(implicit p: Parameters) extends L2Module {
   val mp_release_valid = !state.s_release && state.w_rprobeacklast
   val mp_probeack_valid = !state.s_probeack && state.w_pprobeacklast
   val mp_grant_valid = !state.s_refill && state.w_grantlast && state.w_rprobeacklast && state.s_release // [Alias] grant after rprobe done
-  io.tasks.mainpipe.valid := mp_release_valid || mp_probeack_valid || mp_grant_valid
+  val mp_putpartial_wb_valid = !state.s_putpartial_wb
+  io.tasks.mainpipe.valid := mp_release_valid || mp_probeack_valid || mp_grant_valid || mp_putpartial_wb_valid
   // io.tasks.prefetchTrain.foreach(t => t.valid := !state.s_triggerprefetch.getOrElse(true.B))
 
   val a_task = {
@@ -167,7 +168,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     ob.alias.foreach(_ := meta.alias.getOrElse(0.U))
     ob
   }
-  val mp_release, mp_probeack, mp_grant = Wire(new TaskBundle)
+  val mp_release, mp_probeack, mp_grant, mp_putpartial_wb = Wire(new TaskBundle)
   val mp_release_task = {
     mp_release := DontCare
     mp_release.channel := req.channel
@@ -312,11 +313,30 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_grant.needHint.foreach(_ := false.B)
     mp_grant
   }
+
+  val mp_putpartial_wb_task = {
+    mp_putpartial_wb := DontCare
+    mp_putpartial_wb.mshrTask := true.B
+    mp_putpartial_wb.channel := req.channel
+    mp_putpartial_wb.tag := req.tag
+    mp_putpartial_wb.set := req.set
+    mp_putpartial_wb.off := req.off
+    mp_putpartial_wb.opcode := req.opcode
+    mp_putpartial_wb.mshrId := io.id
+    mp_putpartial_wb.param := 0.U
+    mp_putpartial_wb.reqSource := req.source
+    mp_putpartial_wb.sourceId := req.source
+    mp_putpartial_wb.metaWen := false.B
+    mp_putpartial_wb.tagWen := false.B
+    mp_putpartial_wb.dsWen := dirResult.hit && req_put
+  }
+
   io.tasks.mainpipe.bits := ParallelPriorityMux(
     Seq(
       mp_grant_valid    -> mp_grant,
       mp_release_valid  -> mp_release,
-      mp_probeack_valid -> mp_probeack
+      mp_probeack_valid -> mp_probeack,
+      mp_putpartial_wb_valid -> mp_putpartial_wb
     )
   )
   io.tasks.mainpipe.bits.reqSource := req.reqSource
@@ -345,6 +365,8 @@ class MSHR(implicit p: Parameters) extends L2Module {
       meta.state := INVALID
     }.elsewhen (mp_probeack_valid) {
       state.s_probeack := true.B
+    }.elsewhen (mp_putpartial_wb_valid) {
+      state.s_putpartial_wb := true.B
     }
   }
   // prefetchOpt.foreach {

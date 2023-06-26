@@ -51,6 +51,7 @@ class Slice()(implicit p: Parameters) extends L2Module with DontCareInnerLogic {
   val grantBuf = if (!useFIFOGrantBuffer) Module(new GrantBuffer) else Module(new GrantBufferFIFO)
   val refillBuf = Module(new MSHRBuffer(wPorts = 2))
   val releaseBuf = Module(new MSHRBuffer(wPorts = 3))
+  val putDataBuf = Module(new LookupBuffer(entries = lookupBufEntries))
 
   val prbq = Module(new ProbeQueue())
   prbq.io <> DontCare // @XiaBin TODO
@@ -70,6 +71,7 @@ class Slice()(implicit p: Parameters) extends L2Module with DontCareInnerLogic {
   reqArb.io.mshrTask <> mshrCtl.io.mshrTask
   reqArb.io.refillBufRead_s2 <> refillBuf.io.r
   reqArb.io.releaseBufRead_s2 <> releaseBuf.io.r
+  reqArb.io.putDataBufRead_s2 <> DontCare
   reqArb.io.fromMSHRCtl := mshrCtl.io.toReqArb
   reqArb.io.fromMainPipe := mainPipe.io.toReqArb
   reqArb.io.fromGrantBuffer := grantBuf.io.toReqArb
@@ -102,13 +104,17 @@ class Slice()(implicit p: Parameters) extends L2Module with DontCareInnerLogic {
   mainPipe.io.refillBufResp_s3.bits := refillBuf.io.r.data
   mainPipe.io.releaseBufResp_s3.valid := RegNext(releaseBuf.io.r.valid && releaseBuf.io.r.ready, false.B)
   mainPipe.io.releaseBufResp_s3.bits := releaseBuf.io.r.data
+  mainPipe.io.putDataBufResp_s3.valid := RegNext(putDataBuf.io.r.valid, false.B)
+  mainPipe.io.putDataBufResp_s3.bits := putDataBuf.io.r.data
   mainPipe.io.fromReqArb.status_s1 := reqArb.io.status_s1
   mainPipe.io.grantBufferHint := grantBuf.io.l1Hint
   mainPipe.io.globalCounter := grantBuf.io.globalCounter
   mainPipe.io.taskInfo_s1 <> reqArb.io.taskInfo_s1
   mainPipe.io.putBufRead <> sinkA.io.pbRead
   mainPipe.io.putBufResp <> sinkA.io.pbResp
+
   sinkA.io.fromMainPipe.putReqGood_s3 := mainPipe.io.toSinkA.putReqGood_s3
+  sinkA.io.fromPutDataBuf.full := putDataBuf.io.full
 
   releaseBuf.io.w(0) <> sinkC.io.releaseBufWrite
   releaseBuf.io.w(0).id := mshrCtl.io.releaseBufWriteId
@@ -121,6 +127,12 @@ class Slice()(implicit p: Parameters) extends L2Module with DontCareInnerLogic {
 
   refillBuf.io.w(0) <> refillUnit.io.refillBufWrite
   refillBuf.io.w(1) <> mainPipe.io.refillBufWrite
+
+  putDataBuf.io <> DontCare
+//  putDataBuf.io.full // TODO: block sinkA
+  putDataBuf.io.w <> mainPipe.io.putDataBufWrite
+  putDataBuf.io.r.valid := reqArb.io.putDataBufRead_s2.valid
+  putDataBuf.io.r.id := reqArb.io.putDataBufRead_s2.id
 
   sourceC.io.in <> mainPipe.io.toSourceC
   

@@ -178,6 +178,7 @@ class FSMState(implicit p: Parameters) extends L2Bundle {
   // val s_grantack = Bool() // respond grantack downwards
   // val s_writeback = Bool()// writeback tag/dir
   // val s_triggerprefetch = prefetchOpt.map(_ => Bool())
+  val s_putpartial_wb = Bool()
 
   // wait
   val w_rprobeackfirst = Bool()
