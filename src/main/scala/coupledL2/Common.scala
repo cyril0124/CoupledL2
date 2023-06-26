@@ -234,6 +234,7 @@ class NestedWriteback(implicit p: Parameters) extends L2Bundle {
 class PutBufferRead(implicit p: Parameters) extends L2Bundle {
   val idx = UInt(mshrBits.W)
   val count = UInt(beatBits.W)
+  val isMSHRTask = Bool()
 }
 
 class PutBufferEntry(implicit p: Parameters) extends L2Bundle {

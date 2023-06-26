@@ -80,8 +80,10 @@ class Slice()(implicit p: Parameters) extends L2Module with DontCareInnerLogic {
   mshrCtl.io.resps.sinkE := grantBuf.io.e_resp
   mshrCtl.io.resps.sourceC := sourceC.io.resp
   mshrCtl.io.nestedwb := mainPipe.io.nestedwb
-  mshrCtl.io.pbRead <> sinkA.io.pbRead
-  mshrCtl.io.pbResp <> sinkA.io.pbResp
+//  mshrCtl.io.pbRead <> sinkA.io.pbRead
+//  mshrCtl.io.pbResp <> sinkA.io.pbResp
+//  sinkA.io.pbRead <> DontCare // TODO:
+//  sinkA.io.pbResp <> DontCare // TODO:
 
   directory.io.resp <> mainPipe.io.dirResp_s3
   directory.io.metaWReq <> mainPipe.io.metaWReq
@@ -104,6 +106,9 @@ class Slice()(implicit p: Parameters) extends L2Module with DontCareInnerLogic {
   mainPipe.io.grantBufferHint := grantBuf.io.l1Hint
   mainPipe.io.globalCounter := grantBuf.io.globalCounter
   mainPipe.io.taskInfo_s1 <> reqArb.io.taskInfo_s1
+  mainPipe.io.putBufRead <> sinkA.io.pbRead
+  mainPipe.io.putBufResp <> sinkA.io.pbResp
+  sinkA.io.fromMainPipe.putReqGood_s3 := mainPipe.io.toSinkA.putReqGood_s3
 
   releaseBuf.io.w(0) <> sinkC.io.releaseBufWrite
   releaseBuf.io.w(0).id := mshrCtl.io.releaseBufWriteId
