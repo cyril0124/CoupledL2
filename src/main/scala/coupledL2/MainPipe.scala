@@ -198,7 +198,7 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   assert(RegNext(!(task_s3.valid && !mshr_req_s3 && dirResult_s3.hit && meta_s3.state === TRUNK && !meta_s3.clients.orR)),
           "Trunk should have some client hit")
 
-  val need_mshr_s3_a = need_acquire_s3_a || need_probe_s3_a || cache_alias
+  val need_mshr_s3_a = need_acquire_s3_a || need_probe_s3_a || cache_alias || req_put_partial_s3
   // For channel B reqs, alloc mshr when Probe hits in both self and client dir
   val need_mshr_s3_b = dirResult_s3.hit && req_s3.fromB &&
     !(meta_s3.state === BRANCH && req_s3.param === toB) &&
@@ -326,7 +326,7 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   val wen_c = sinkC_req_s3 && isParamFromT(req_s3.param) && req_s3.opcode(0)
   val wen   = wen_c || wen_a || req_s3.dsWen && (mshr_grant_s3 || mshr_accessackdata_s3 || mshr_probeack_s3 || mshr_hintack_s3)
 
-  val need_data_on_hit_a  = req_get_s3 || req_acquireBlock_s3
+  val need_data_on_hit_a  = req_get_s3 || req_acquireBlock_s3 || req_put_partial_s3
   val need_data_on_miss_a = a_need_replacement // read data ahead of time to prepare for ReleaseData later
   val need_data_b         = sinkB_req_s3 && dirResult_s3.hit &&
                               (meta_s3.state === TRUNK || meta_s3.state === TIP && meta_s3.dirty || req_s3.needProbeAckData)
@@ -610,7 +610,7 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   // ! Caution: s_ and w_ are false-as-valid
   when(req_s3.fromA) {
     alloc_state.s_refill := false.B
-    alloc_state.w_grantack := req_prefetch_s3 || req_get_s3 || req_put_s3
+    alloc_state.w_grantack := req_prefetch_s3 || req_get_s3 // || req_put_s3
     // need replacement
     when(a_need_replacement) {
       alloc_state.w_releaseack := false.B
@@ -627,7 +627,8 @@ class MainPipe(implicit p: Parameters) extends L2Module {
       assert(alloc_state.s_acquire || alloc_state.s_release)
     }
     // need Acquire downwards
-    when(need_acquire_s3_a || req_put_s3) {
+//    when(need_acquire_s3_a || req_put_s3) {
+    when(need_acquire_s3_a) {
       alloc_state.s_acquire := false.B
       alloc_state.w_grantfirst := false.B
       alloc_state.w_grantlast := false.B
