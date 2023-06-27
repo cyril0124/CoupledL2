@@ -64,6 +64,8 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {
 
   // For Put
   val pbIdx = UInt(mshrBits.W)
+  val putHit = Bool()
+  val opcodeIsReq = Bool() // opcode is req opcode not resp opcode
 
   // For Intent
   val fromL2pft = prefetchOpt.map(_ => Bool()) // Is the prefetch req from L2(BOP) or from L1 prefetch?
@@ -178,7 +180,7 @@ class FSMState(implicit p: Parameters) extends L2Bundle {
   // val s_grantack = Bool() // respond grantack downwards
   // val s_writeback = Bool()// writeback tag/dir
   // val s_triggerprefetch = prefetchOpt.map(_ => Bool())
-  val s_putpartial_wb = Bool()
+  val s_put_wb = Bool()
 
   // wait
   val w_rprobeackfirst = Bool()

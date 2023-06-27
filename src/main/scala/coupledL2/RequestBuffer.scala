@@ -107,8 +107,11 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   val in      = io.in.bits
   val full    = Cat(buffer.map(_.valid)).andR
   // flow not allowed when full, or entries might starve
+  val conflictWithMSHR = conflict(in)
+  val mainPipeBlock = Cat(io.mainPipeBlock).orR
+  val noFreeWayWithMSHR = noFreeWay(in)
   val canFlow = flow.B && !full &&
-    !conflict(in) && !chosenQValid && !Cat(io.mainPipeBlock).orR && !noFreeWay(in)
+    !conflictWithMSHR && !chosenQValid && !mainPipeBlock && !noFreeWayWithMSHR
   val doFlow  = canFlow && io.out.ready
 
   //  val depMask    = buffer.map(e => e.valid && sameAddr(io.in.bits, e.task))

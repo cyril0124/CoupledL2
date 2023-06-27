@@ -36,14 +36,14 @@ class GrantBufferFIFO(implicit p: Parameters) extends BaseGrantBuffer with HasCi
 
   class GrantBufferPtr(implicit p: Parameters) extends CircularQueuePtr[GrantBufferPtr](mshrsAll){ }
 
-  object GrantBufferPtr {
-    def apply(f: Bool, v: UInt)(implicit p: Parameters): GrantBufferPtr = {
-      val ptr = Wire(new GrantBufferPtr)
-      ptr.flag := f
-      ptr.value := v
-      ptr
-    }
-  }
+//  object GrantBufferPtr {
+//    def apply(f: Bool, v: UInt)(implicit p: Parameters): GrantBufferPtr = {
+//      val ptr = Wire(new GrantBufferPtr)
+//      ptr.flag := f
+//      ptr.value := v
+//      ptr
+//    }
+//  }
 
   val enqPtrExt = RegInit(0.U.asTypeOf(new GrantBufferPtr))
   val deqPtrExt = RegInit(0.U.asTypeOf(new GrantBufferPtr))

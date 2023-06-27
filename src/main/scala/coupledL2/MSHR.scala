@@ -108,6 +108,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
   val req_needT = needT(req.opcode, req.param)
   val req_acquire = req.opcode === AcquireBlock && req.fromA || req.opcode === AcquirePerm // AcquireBlock and Probe share the same opcode
   val req_acquirePerm = req.opcode === AcquirePerm
+  val req_putfull = req.opcode === PutFullData
   val req_put = req.opcode === PutFullData || req.opcode === PutPartialData
   val req_get = req.opcode === Get
   val req_prefetch = req.opcode === Hint
@@ -119,9 +120,9 @@ class MSHR(implicit p: Parameters) extends L2Module {
   io.tasks.source_b.valid := !state.s_pprobe || !state.s_rprobe
   val mp_release_valid = !state.s_release && state.w_rprobeacklast
   val mp_probeack_valid = !state.s_probeack && state.w_pprobeacklast
-  val mp_grant_valid = !state.s_refill && state.w_grantlast && state.w_rprobeacklast && state.s_release // [Alias] grant after rprobe done
-  val mp_putpartial_wb_valid = !state.s_putpartial_wb
-  io.tasks.mainpipe.valid := mp_release_valid || mp_probeack_valid || mp_grant_valid || mp_putpartial_wb_valid
+  val mp_grant_valid = !state.s_refill && state.w_grantlast && state.w_rprobeacklast && state.s_release && !req_put// [Alias] grant after rprobe done
+  val mp_put_wb_valid = !state.s_put_wb && state.w_rprobeacklast && state.w_releaseack && state.w_pprobeacklast && state.w_grantlast && state.s_release // && state.s_refill
+  io.tasks.mainpipe.valid := mp_release_valid || mp_probeack_valid || mp_grant_valid || mp_put_wb_valid
   // io.tasks.prefetchTrain.foreach(t => t.valid := !state.s_triggerprefetch.getOrElse(true.B))
 
   val a_task = {
@@ -132,16 +133,21 @@ class MSHR(implicit p: Parameters) extends L2Module {
     oa.off := req.off
     oa.source := io.id
     oa.opcode := Mux(
-      req_put || req_acquirePerm,
+      req_acquirePerm,
       req.opcode,
-      // Get or AcquireBlock
-      AcquireBlock
+      Mux(
+        req_putfull,
+        AcquirePerm,
+        // Get or AcquireBlock or PutPartialData
+        AcquireBlock
+      )
     )
-    oa.param := Mux(
-      req_put,
-      req.param,
-      Mux(req_needT, Mux(dirResult.hit, BtoT, NtoT), NtoB)
-    )
+//    oa.param := Mux(
+//      req_put,
+//      req.param,
+//      Mux(req_needT, Mux(dirResult.hit, BtoT, NtoT), NtoB)
+//    )
+    oa.param := Mux(req_needT || req_putfull, Mux(dirResult.hit, BtoT, NtoT), NtoB)
     oa.size := req.size
     oa.pbIdx := req.pbIdx
     oa.reqSource := req.reqSource
@@ -168,7 +174,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     ob.alias.foreach(_ := meta.alias.getOrElse(0.U))
     ob
   }
-  val mp_release, mp_probeack, mp_grant, mp_putpartial_wb = Wire(new TaskBundle)
+  val mp_release, mp_probeack, mp_grant, mp_put_wb = Wire(new TaskBundle)
   val mp_release_task = {
     mp_release := DontCare
     mp_release.channel := req.channel
@@ -314,21 +320,37 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_grant
   }
 
-  val mp_putpartial_wb_task = {
-    mp_putpartial_wb := DontCare
-    mp_putpartial_wb.mshrTask := true.B
-    mp_putpartial_wb.channel := req.channel
-    mp_putpartial_wb.tag := req.tag
-    mp_putpartial_wb.set := req.set
-    mp_putpartial_wb.off := req.off
-    mp_putpartial_wb.opcode := req.opcode
-    mp_putpartial_wb.mshrId := io.id
-    mp_putpartial_wb.param := 0.U
-    mp_putpartial_wb.reqSource := req.source
-    mp_putpartial_wb.sourceId := req.source
-    mp_putpartial_wb.metaWen := false.B
-    mp_putpartial_wb.tagWen := false.B
-    mp_putpartial_wb.dsWen := dirResult.hit && req_put
+  val mp_put_wb_task = {
+    mp_put_wb := DontCare
+    mp_put_wb.mshrTask := true.B
+    mp_put_wb.channel := req.channel
+    mp_put_wb.tag := req.tag
+    mp_put_wb.set := req.set
+    mp_put_wb.off := req.off
+    mp_put_wb.way := req.way
+    mp_put_wb.opcode := req.opcode
+    mp_put_wb.opcodeIsReq := true.B
+    mp_put_wb.mshrId := io.id
+    mp_put_wb.param := 0.U
+    mp_put_wb.reqSource := req.source
+    mp_put_wb.sourceId := req.source
+    mp_put_wb.pbIdx := req.pbIdx
+    mp_put_wb.putHit := dirResult.hit
+    mp_put_wb.useProbeData := dirResult.hit
+    mp_put_wb.needProbeAckData := req.opcode === PutPartialData
+    mp_put_wb.metaWen := true.B
+    mp_put_wb.tagWen := !dirResult.hit
+    mp_put_wb.meta := MetaEntry(
+      dirty = true.B,
+      state = TIP,
+      clients = Fill(clientBits, false.B),
+      alias = Some(req.alias.getOrElse(0.U)),
+      prefetch = false.B,
+      accessed = true.B //[Access] TODO: check
+    )
+//    mp_put_wb.dsWen := dirResult.hit && req_put
+    mp_put_wb.dsWen := true.B
+    mp_put_wb
   }
 
   io.tasks.mainpipe.bits := ParallelPriorityMux(
@@ -336,7 +358,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
       mp_grant_valid    -> mp_grant,
       mp_release_valid  -> mp_release,
       mp_probeack_valid -> mp_probeack,
-      mp_putpartial_wb_valid -> mp_putpartial_wb
+      mp_put_wb_valid   -> mp_put_wb
     )
   )
   io.tasks.mainpipe.bits.reqSource := req.reqSource
@@ -365,8 +387,9 @@ class MSHR(implicit p: Parameters) extends L2Module {
       meta.state := INVALID
     }.elsewhen (mp_probeack_valid) {
       state.s_probeack := true.B
-    }.elsewhen (mp_putpartial_wb_valid) {
-      state.s_putpartial_wb := true.B
+    }.elsewhen (mp_put_wb_valid) {
+      state.s_refill := true.B
+      state.s_put_wb := true.B
     }
   }
   // prefetchOpt.foreach {
