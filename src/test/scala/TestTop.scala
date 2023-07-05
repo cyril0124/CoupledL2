@@ -373,7 +373,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   }
 
   val l2xbar = TLXbar()
-  val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffL), beatBytes = 32))
+  // val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffL), beatBytes = 32))
+  val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffL), beatBytes = 32))
   var master_nodes: Seq[TLClientNode] = Seq() // TODO
 
   (0 until nrL2).map{i =>
@@ -393,7 +394,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       case L2ParamKey => L2Param(
         name = s"l2$i",
         ways = 4,
-        sets = 128,
+        // sets = 128,
+        sets = 32,
         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
         echoField = Seq(DirtyField()),
         prefetch = Some(BOPParameters(

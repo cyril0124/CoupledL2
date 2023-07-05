@@ -31,42 +31,12 @@ class SinkA(implicit p: Parameters) extends L2Module {
     val a = Flipped(DecoupledIO(new TLBundleA(edgeIn.bundle)))
     val prefetchReq = prefetchOpt.map(_ => Flipped(DecoupledIO(new PrefetchReq)))
     val toReqArb = DecoupledIO(new TaskBundle)
-    val pbRead = Flipped(DecoupledIO(new PutBufferRead))
-    val pbResp = ValidIO(new PutBufferEntry)
   })
-  val putBuffer = Reg(Vec(mshrsAll, Vec(beatSize, new PutBufferEntry)))
-  val beatValids = RegInit(VecInit(Seq.fill(mshrsAll)(VecInit(Seq.fill(beatSize)(false.B)))))
-  val valids = VecInit(beatValids.map(_.asUInt.orR())).asUInt
-  
-  val (first, last, done, count) = edgeIn.count(io.a)
-  val hasData = edgeIn.hasData(io.a.bits)
-  val full = valids.andR()
-  val noSpace = full && hasData
-  val insertIdx = PriorityEncoder(~valids)
-  val insertIdxReg = RegEnable(insertIdx, 0.U.asTypeOf(insertIdx), io.a.fire() && first)
-
-  when (io.a.fire() && hasData) {
-    when (first) {
-      putBuffer(insertIdx)(count).data.data := io.a.bits.data
-      putBuffer(insertIdx)(count).mask := io.a.bits.mask
-      beatValids(insertIdx)(count) := true.B
-    }.otherwise {
-      putBuffer(insertIdxReg)(count).data.data := io.a.bits.data
-      putBuffer(insertIdxReg)(count).mask := io.a.bits.mask
-      beatValids(insertIdxReg)(count) := true.B
-    }
-  }
-
-  // val rIdx = io.pbRead.bits.idx
-  // val res = putBuffer(rIdx)
-  when (io.pbRead.fire()) {
-    beatValids(io.pbRead.bits.idx)(io.pbRead.bits.count) := false.B
-  }
 
   val commonReq = Wire(io.toReqArb.cloneType)
   val prefetchReq = prefetchOpt.map(_ => Wire(io.toReqArb.cloneType))
 
-  io.a.ready := !first || commonReq.ready && !noSpace
+  io.a.ready := commonReq.ready
 
   def fromTLAtoTaskBundle(a: TLBundleA): TaskBundle = {
     val task = Wire(new TaskBundle)
@@ -81,7 +51,7 @@ class SinkA(implicit p: Parameters) extends L2Module {
     task.size := a.size
     task.sourceId := a.source
     task.mshrTask := false.B
-    task.pbIdx := insertIdx
+    task.pbIdx := DontCare
     task.fromL2pft.foreach(_ := false.B)
     task.needHint.foreach(_ := a.user.lift(PrefetchKey).getOrElse(false.B))
     task.reqSource := a.user.lift(utility.ReqSourceKey).getOrElse(MemReqSource.NoWhere.id.U)
@@ -108,7 +78,8 @@ class SinkA(implicit p: Parameters) extends L2Module {
     task.reqSource := MemReqSource.L2Prefetch.id.U
     task
   }
-  commonReq.valid := io.a.valid && first && !noSpace
+
+  commonReq.valid := io.a.valid
   commonReq.bits := fromTLAtoTaskBundle(io.a.bits)
   if (prefetchOpt.nonEmpty) {
     prefetchReq.get.valid := io.prefetchReq.get.valid
@@ -118,12 +89,6 @@ class SinkA(implicit p: Parameters) extends L2Module {
   } else {
     io.toReqArb <> commonReq
   }
-
-  io.pbRead.ready := beatValids(io.pbRead.bits.idx)(io.pbRead.bits.count)
-  assert(!io.pbRead.valid || io.pbRead.ready)
-
-  io.pbResp.valid := RegNext(io.pbRead.fire(), false.B)
-  io.pbResp.bits := RegEnable(putBuffer(io.pbRead.bits.idx)(io.pbRead.bits.count), io.pbRead.fire())
 
   // Performance counters
   // num of reqs
@@ -148,7 +113,4 @@ class SinkA(implicit p: Parameters) extends L2Module {
     (io.toReqArb.bits.opcode === PutFullData || io.toReqArb.bits.opcode === PutPartialData))
   prefetchOpt.foreach { _ => XSPerfAccumulate(cacheParams, "sinkA_prefetch_stall_by_mainpipe", stall && io.toReqArb.bits.opcode === Hint) }
 
-  // cycles stalled for no space
-  XSPerfAccumulate(cacheParams, "sinkA_put_stall_for_noSpace", io.a.valid && first && noSpace)
-  XSPerfAccumulate(cacheParams, "putbuffer_full", full)
 }

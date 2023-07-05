@@ -80,8 +80,6 @@ class Slice()(implicit p: Parameters) extends L2Module with DontCareInnerLogic {
   mshrCtl.io.resps.sinkE := grantBuf.io.e_resp
   mshrCtl.io.resps.sourceC := sourceC.io.resp
   mshrCtl.io.nestedwb := mainPipe.io.nestedwb
-  mshrCtl.io.pbRead <> sinkA.io.pbRead
-  mshrCtl.io.pbResp <> sinkA.io.pbResp
 
   directory.io.resp <> mainPipe.io.dirResp_s3
   directory.io.metaWReq <> mainPipe.io.metaWReq

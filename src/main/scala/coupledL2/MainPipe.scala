@@ -133,6 +133,10 @@ class MainPipe(implicit p: Parameters) extends L2Module {
     task_s3.bits := task_s2.bits
   }
 
+  //  TODO: debug address consider multi-bank
+  val debug_addr_s3 = (task_s3.bits.set << offsetBits).asUInt + (task_s3.bits.tag << (setBits + offsetBits)).asUInt
+  dontTouch(debug_addr_s3)
+
   /* ======== Enchantment ======== */
   val dirResult_s3    = io.dirResp_s3
   val meta_s3         = dirResult_s3.meta
@@ -163,7 +167,7 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   val meta_has_clients_s3   = meta_s3.clients.orR
   val req_needT_s3          = needT(req_s3.opcode, req_s3.param) // require T status to handle req
   val a_need_replacement    = sinkA_req_s3 && !dirResult_s3.hit && meta_s3.state =/= INVALID // b and c do not need replacement
-  assert(!(sinkC_req_s3 && !dirResult_s3.hit), "C Release should always hit, Tag %x Set %x", req_s3.tag, req_s3.set)
+  assert(!(sinkC_req_s3 && !dirResult_s3.hit), "C Release should always hit, Tag:0x%x Set:0x%x Addr:0x%x Source:%d isMSHRTask:%d MSHR:%d", req_s3.tag, req_s3.set, debug_addr_s3, task_s3.bits.sourceId, task_s3.bits.mshrTask, task_s3.bits.mshrId)
 
   //[Alias] TODO: consider 1 client for now
   val cache_alias           = req_acquire_s3 && dirResult_s3.hit && meta_s3.clients(0) &&
