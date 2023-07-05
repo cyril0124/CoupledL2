@@ -157,6 +157,7 @@ class RespInfoBundle(implicit p: Parameters) extends L2Bundle {
   val param = UInt(3.W)
   val last = Bool() // last beat
   val dirty = Bool() // only used for sinkD resps
+  val isHit = Bool() // only used for sinkD resps
 }
 
 class RespBundle(implicit p: Parameters) extends L2Bundle {
@@ -253,7 +254,7 @@ class L2ToL1Hint(implicit p: Parameters) extends Bundle {
 }
 
 // indicates where the memory access request comes from
-// a dupliacte of this is in Xiangshan.package and HuanCun.common
+// a dupliacte of this is in xiangShan/package.scala utility/TLUtils/BusKeyField.scala
 object MemReqSource extends Enumeration {
   val NoWhere = Value("NoWhere")
 
