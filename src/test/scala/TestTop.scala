@@ -8,7 +8,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import huancun._
 import coupledL2.prefetch._
-import utility.{ChiselDB, FileRegisters}
+// import utility.{ChiselDB, FileRegisters}
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -463,9 +463,9 @@ object TestTop_L2 extends App {
     ChiselGeneratorAnnotation(() => top.module)
   ))
 
-  ChiselDB.init(false)
-  ChiselDB.addToFileRegisters
-  FileRegisters.write("./build")
+  // ChiselDB.init(false)
+  // ChiselDB.addToFileRegisters
+  // FileRegisters.write("./build")
 }
 
 object TestTop_L2_Standalone extends App {
@@ -481,9 +481,9 @@ object TestTop_L2_Standalone extends App {
     ChiselGeneratorAnnotation(() => top.module)
   ))
 
-  ChiselDB.init(false)
-  ChiselDB.addToFileRegisters
-  FileRegisters.write("./build")
+  // ChiselDB.init(false)
+  // ChiselDB.addToFileRegisters
+  // FileRegisters.write("./build")
 }
 
 object TestTop_L2L3 extends App {
@@ -502,9 +502,9 @@ object TestTop_L2L3 extends App {
     ChiselGeneratorAnnotation(() => top.module)
   ))
 
-  ChiselDB.init(false)
-  ChiselDB.addToFileRegisters
-  FileRegisters.write("./build")
+  // ChiselDB.init(false)
+  // ChiselDB.addToFileRegisters
+  // FileRegisters.write("./build")
 }
 
 object TestTop_L2L3L2 extends App {
@@ -523,9 +523,9 @@ object TestTop_L2L3L2 extends App {
     ChiselGeneratorAnnotation(() => top.module)
   ))
 
-  ChiselDB.init(false)
-  ChiselDB.addToFileRegisters
-  FileRegisters.write("./build")
+  // ChiselDB.init(false)
+  // ChiselDB.addToFileRegisters
+  // FileRegisters.write("./build")
 }
 
 object TestTop_fullSys extends App {
@@ -544,7 +544,7 @@ object TestTop_fullSys extends App {
     ChiselGeneratorAnnotation(() => top.module)
   ))
 
-  ChiselDB.init(false)
-  ChiselDB.addToFileRegisters
-  FileRegisters.write("./build")
+  // ChiselDB.init(false)
+  // ChiselDB.addToFileRegisters
+  // FileRegisters.write("./build")
 }

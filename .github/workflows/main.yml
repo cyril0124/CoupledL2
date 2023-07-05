@@ -54,6 +54,6 @@ jobs:
             make test-top-l2l3l2
             cd ./tl-test
             mkdir build && cd build
-            cmake .. -DDUT_DIR=../../build -DCHISELDB=1
+            cmake .. -DDUT_DIR=../../build
             make
             ./tlc_test -s $RANDOM
