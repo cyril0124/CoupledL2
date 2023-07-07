@@ -105,7 +105,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
   val meta_pft = meta.prefetch.getOrElse(false.B)
   val meta_no_client = !meta.clients.orR
 
-  val req_needT = needT(req.opcode, req.param)
+  val req_needT = needT(req.opcode, req.param) // Put / Acquire.NtoT / Acquire.BtoT / Hint.prefetch_write
   val req_acquire = req.opcode === AcquireBlock && req.fromA || req.opcode === AcquirePerm // AcquireBlock and Probe share the same opcode
   val req_acquirePerm = req.opcode === AcquirePerm
   val req_putfull = req.opcode === PutFullData
@@ -158,22 +158,39 @@ class MSHR(implicit p: Parameters) extends L2Module {
     oa.set := req.set
     oa.off := req.off
     oa.source := io.id
-    oa.opcode := Mux(
-      req_acquirePerm,
-      req.opcode,
-      Mux(
-        req_putfull,
-        AcquirePerm,
-        // Get or AcquireBlock or PutPartialData
-        AcquireBlock
+    if (cacheParams.name == "l3") {
+      oa.opcode := Mux(
+          req_putfull,
+          AcquirePerm,
+          // Get or AcquireBlock or PutPartialData
+          AcquireBlock
       )
-    )
+    } else {
+      oa.opcode := Mux(
+        req_acquirePerm,
+        req.opcode,
+        Mux(
+          req_putfull,
+          AcquirePerm,
+          // Get or AcquireBlock or PutPartialData
+          AcquireBlock
+        )
+      )
+    }
 //    oa.param := Mux(
 //      req_put,
 //      req.param,
 //      Mux(req_needT, Mux(dirResult.hit, BtoT, NtoT), NtoB)
 //    )
-    oa.param := Mux(req_needT || req_putfull, Mux(dirResult.hit, BtoT, NtoT), NtoB)
+    if(cacheParams.name == "l3") {
+      oa.param := Mux(req_needT || req_putfull, Mux(dirResult.hit, BtoT, NtoT), NtoT)
+
+      when (io.tasks.source_a.valid) {
+        assert(oa.param === NtoT, s"unexpected oa.param: %d req_needT: %d dirResult.hit: %d set: 0x%x tag: 0x%x", oa.param, req_needT, dirResult.hit, status_reg.bits.set, status_reg.bits.tag)
+      }
+    } else {
+      oa.param := Mux(req_needT || req_putfull, Mux(dirResult.hit, BtoT, NtoT), NtoB)
+    }
     oa.size := req.size
     oa.pbIdx := req.pbIdx
     oa.reqSource := req.reqSource
@@ -330,75 +347,86 @@ class MSHR(implicit p: Parameters) extends L2Module {
     // but not replacement-cased Probe
     mp_grant.useProbeData := dirResult.hit && ( req_get || probeDirty ) || req.aliasTask.getOrElse(false.B)
 
-//    val new_meta = MetaEntry()
-//    new_meta.dirty := gotDirty || dirResult.hit && (meta.dirty || probeDirty)
-//    new_meta.clients := Mux(
-//      req_prefetch,
-//      Mux(dirResult.hit, meta.clients, Fill(clientBits, false.B)),
-//      mergedClients
-//    )
-//    new_meta.alias.foreach(_ := aliasFinal)
-//    new_meta.prefetch.foreach(_ := req_prefetch || dirResult.hit && meta_pft)
-//    new_meta.accessed := req_acquire || req_get || req_put //[Access] TODO: check
-//    if(cacheParams.name == "l3") {
-////      require(false, "TODO:")
-//      new_meta.state := Mux(
-//        req_get,
-//        Mux(
-//          dirResult.hit,
-//          Mux(isT(meta.state), TIP, BRANCH),
-//          Mux(req_promoteT, TIP, BRANCH)
-//        ),
-//        Mux(
-//          req_promoteT || req_needT,
-//          Mux(req_prefetch, TIP, TRUNK),
-//          BRANCH
-//        )
-//      )
-//      when(status_reg.valid && mp_grant_valid) {
-////        assert(dirResult.hit && isT(meta.state))
-//      }
-//    } else {
-//      new_meta.state := Mux(
-//        req_get,
-//        Mux(
-//          dirResult.hit,
-//          Mux(isT(meta.state), TIP, BRANCH),
-//          Mux(req_promoteT, TIP, BRANCH)
-//        ),
-//        Mux(
-//          req_promoteT || req_needT,
-//          Mux(req_prefetch, TIP, TRUNK),
-//          BRANCH
-//        )
-//      )
-//    }
-//    mp_grant.meta := new_meta
+    val new_meta = MetaEntry()
+    new_meta.dirty := gotDirty || dirResult.hit && (meta.dirty || probeDirty)
+    new_meta.alias.foreach(_ := aliasFinal)
+    new_meta.prefetch.foreach(_ := req_prefetch || dirResult.hit && meta_pft)
+    new_meta.accessed := req_acquire || req_get || req_put //[Access] TODO: check
+    if(cacheParams.name == "l3") {
+      require(cacheParams.inclusionPolicy == "inclusive")
 
-    mp_grant.meta := MetaEntry(
-        dirty = gotDirty || dirResult.hit && (meta.dirty || probeDirty),
-        state = Mux(
-          req_get,
-          Mux(
-            dirResult.hit,
-            Mux(isT(meta.state), TIP, BRANCH),
-            Mux(req_promoteT, TIP, BRANCH)
-          ),
-          Mux(
-            req_promoteT || req_needT,
-            Mux(req_prefetch, TIP, TRUNK),
-            BRANCH
-          )
+      new_meta.clients := Mux(
+        req_prefetch,
+        Mux(dirResult.hit, meta.clients, Fill(clientBits, false.B)),
+        mergedClients
+      )
+
+      new_meta.state := Mux(
+        req_get,
+        TIP,
+//        Mux(
+//          dirResult.hit,
+//          Mux(isT(meta.state), TIP, BRANCH),
+//          Mux(req_promoteT, TIP, BRANCH)
+//        ),
+        Mux(req_prefetch, TIP, Mux(meta_no_client, TRUNK, TIP)),
+//        Mux(
+//          req_promoteT || req_needT,
+//          Mux(req_prefetch, TIP, TRUNK),
+//          BRANCH
+//        )
+      )
+
+      when(status_reg.valid && mp_grant_valid && dirResult.hit) {
+        assert(isT(meta.state))
+      }
+    } else { // L2
+      new_meta.clients := Mux(
+        req_prefetch,
+        Mux(dirResult.hit, meta.clients, Fill(clientBits, false.B)),
+        Fill(clientBits, !(req_get && (!dirResult.hit || meta_no_client || probeGotN)))
+      )
+
+      new_meta.state := Mux(
+        req_get,
+        Mux(
+          dirResult.hit,
+          Mux(isT(meta.state), TIP, BRANCH),
+          Mux(req_promoteT, TIP, BRANCH)
         ),
-        clients = Mux(
-          req_prefetch,
-          Mux(dirResult.hit, meta.clients, Fill(clientBits, false.B)),
-          if(cacheParams.name == "l3") mergedClients else Fill(clientBits, !(req_get && (!dirResult.hit || meta_no_client || probeGotN)))
-        ),
-        alias = Some(aliasFinal),
-        prefetch = req_prefetch || dirResult.hit && meta_pft,
-        accessed = req_acquire || req_get || req_put //[Access] TODO: check
-    )
+        Mux(
+          req_promoteT || req_needT,
+          Mux(req_prefetch, TIP, TRUNK),
+          BRANCH
+        )
+      )
+    }
+    mp_grant.meta := new_meta
+
+//    mp_grant.meta := MetaEntry(
+//        dirty = gotDirty || dirResult.hit && (meta.dirty || probeDirty),
+//        state = Mux(
+//          req_get,
+//          Mux(
+//            dirResult.hit,
+//            Mux(isT(meta.state), TIP, BRANCH),
+//            Mux(req_promoteT, TIP, BRANCH)
+//          ),
+//          Mux(
+//            req_promoteT || req_needT,
+//            Mux(req_prefetch, TIP, TRUNK),
+//            BRANCH
+//          )
+//        ),
+//        clients = Mux(
+//          req_prefetch,
+//          Mux(dirResult.hit, meta.clients, Fill(clientBits, false.B)),
+//          if(cacheParams.name == "l3") mergedClients else Fill(clientBits, !(req_get && (!dirResult.hit || meta_no_client || probeGotN)))
+//        ),
+//        alias = Some(aliasFinal),
+//        prefetch = req_prefetch || dirResult.hit && meta_pft,
+//        accessed = req_acquire || req_get || req_put //[Access] TODO: check
+//    )
     mp_grant.metaWen := !req_put
     mp_grant.tagWen := !dirResult.hit && !req_put
 

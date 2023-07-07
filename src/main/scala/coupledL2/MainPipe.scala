@@ -232,7 +232,7 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   }
 
   if (cacheParams.name == "l3") {
-    //    assert(RegNext(!(task_s3.valid && !mshr_req_s3 && dirResult_s3.hit && meta_s3.state === BRANCH)), "L3 cannot have BRANCH state")
+       assert(RegNext(!(task_s3.valid && !mshr_req_s3 && dirResult_s3.hit && meta_s3.state === BRANCH)), "L3 cannot have BRANCH state")
   }
 
   assert(RegNext(!(task_s3.valid && !mshr_req_s3 && dirResult_s3.hit && meta_s3.state === TRUNK && !meta_s3.clients.orR)),

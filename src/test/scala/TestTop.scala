@@ -506,7 +506,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       ways = 4,
       // sets = 128,
       sets = 32,
-      clientCaches = Seq(L1Param(aliasBitsOpt = None)),
+      clientCaches = Seq(L1Param(aliasBitsOpt = None)), // TODO: For L3 this should be L2Param
       echoField = Seq(DirtyField()),
       prefetch = None
     )
