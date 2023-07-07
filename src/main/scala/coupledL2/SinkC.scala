@@ -131,10 +131,14 @@ class SinkC(implicit p: Parameters) extends L2Module {
   io.resp.mshrId := 0.U // DontCare
   io.resp.tag := parseAddress(io.c.bits.address)._1
   io.resp.set := parseAddress(io.c.bits.address)._2
+  io.resp.respInfo := DontCare
   io.resp.respInfo.opcode := io.c.bits.opcode
   io.resp.respInfo.param := io.c.bits.param
   io.resp.respInfo.last := last
   io.resp.respInfo.dirty := io.c.bits.opcode(0)
+  if(cacheParams.name == "l3") {
+    io.resp.respInfo.source := io.c.bits.source
+  }
 
   io.releaseBufWrite.valid := io.c.valid && io.c.bits.opcode === ProbeAckData
   io.releaseBufWrite.beat_sel := UIntToOH(beat)

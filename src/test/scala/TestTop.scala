@@ -67,6 +67,75 @@ class TestTop_L2()(implicit p: Parameters) extends LazyModule {
   }
 }
 
+class TestTop_L3()(implicit p: Parameters) extends LazyModule {
+
+  /*   L2  L2
+   *    \ /
+   *     L3
+   */
+
+  val delayFactor = 0.5
+  val cacheParams = p(L2ParamKey)
+
+  def createClientNode(name: String, sources: Int) = {
+    val masterNode = TLClientNode(Seq(
+      TLMasterPortParameters.v2(
+        masters = Seq(
+          TLMasterParameters.v1(
+            name = name,
+            sourceId = IdRange(0, sources),
+            supportsProbe = TransferSizes(cacheParams.blockBytes)
+          )
+        ),
+        channelBytes = TLChannelBeatBytes(cacheParams.blockBytes),
+        minLatency = 1,
+        echoFields = Nil,
+        requestFields = Seq(AliasField(2)),
+        responseKeys = cacheParams.respKey
+      )
+    ))
+    masterNode
+  }
+
+  val fake_l2_nodes = (0 until 2) map( i => createClientNode(s"l2$i", 32))
+  val master_nodes = fake_l2_nodes
+
+  val l3 = LazyModule(new CoupledL2())
+  val xbar = TLXbar()
+  val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffL), beatBytes = 32))
+
+  for (l2 <- fake_l2_nodes) {
+    xbar := TLBuffer() := l2
+  }
+
+  val dma_node = TLClientNode(Seq(TLMasterPortParameters.v2(
+    Seq(TLMasterParameters.v1(
+      name = "dma",
+      sourceId = IdRange(0, 16),
+      supportsProbe = TransferSizes.none
+    )),
+    channelBytes = TLChannelBeatBytes(cacheParams.blockBytes),
+    minLatency = 1,
+    echoFields = Nil,
+  )))
+  xbar := TLBuffer() := dma_node
+
+  ram.node :=
+    TLXbar() :=*
+      TLFragmenter(32, 64) :=*
+      TLCacheCork() :=*
+      TLDelayer(delayFactor) :=*
+      l3.node :=* xbar
+
+  lazy val module = new LazyModuleImp(this){
+    master_nodes.zipWithIndex.foreach{
+      case (node, i) =>
+        node.makeIOs()(ValName(s"master_port_$i"))
+    }
+    dma_node.makeIOs()(ValName("dma_port"))
+  }
+}
+
 class TestTop_L2L3()(implicit p: Parameters) extends LazyModule {
   /* L1I    L1D
    *   \    /
@@ -411,25 +480,49 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     l2xbar := TLBuffer() := l2node := l1xbar
   }
 
-  val l3 = LazyModule(new HuanCun()(new Config((_, _, _) => {
-    case HCCacheParamsKey => HCCacheParameters(
-      name = "L3",
-      level = 3,
+//  val l3 = LazyModule(new HuanCun()(new Config((_, _, _) => {
+//    case HCCacheParamsKey => HCCacheParameters(
+//      name = "L3",
+//      level = 3,
+//      ways = 4,
+//      sets = 128,
+//      inclusive = false,
+//      clientCaches = (0 until nrL2).map(i =>
+//        CacheParameters(
+//          name = s"l2",
+//          sets = 128,
+//          ways = 4,
+//          blockGranularity = log2Ceil(128)
+//        ),
+//      ),
+//      echoField = Seq(DirtyField()),
+//      simulation = true
+//    )
+//  })))
+
+  val l3 = LazyModule(new CoupledL2()(new Config((_, _, _) => {
+    case L2ParamKey => L2Param(
+      name = s"l3",
       ways = 4,
-      sets = 128,
-      inclusive = false,
-      clientCaches = (0 until nrL2).map(i =>
-        CacheParameters(
-          name = s"l2",
-          sets = 128,
-          ways = 4,
-          blockGranularity = log2Ceil(128)
-        ),
-      ),
+      // sets = 128,
+      sets = 32,
+      clientCaches = Seq(L1Param(aliasBitsOpt = None)),
       echoField = Seq(DirtyField()),
-      simulation = true
+      prefetch = None
     )
   })))
+
+  val dma_node = TLClientNode(Seq(TLMasterPortParameters.v2(
+      Seq(TLMasterParameters.v1(
+        name = "dma",
+        sourceId = IdRange(0, 16),
+        supportsProbe = TransferSizes.none
+      )),
+      channelBytes = TLChannelBeatBytes(cacheParams.blockBytes),
+      minLatency = 1,
+      echoFields = Nil,
+    )))
+  l2xbar := TLBuffer() := dma_node
 
   ram.node :=
     TLXbar() :=*
@@ -443,6 +536,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       case (node, i) =>
         node.makeIOs()(ValName(s"master_port_$i"))
     }
+    dma_node.makeIOs()(ValName("dma_port"))
   }
 }
 
@@ -454,6 +548,24 @@ object TestTop_L2 extends App {
     )
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_L2()(p)) )(config)
+
+  (new ChiselStage).execute(args, Seq(
+    ChiselGeneratorAnnotation(() => top.module)
+  ))
+}
+
+object TestTop_L3 extends App {
+  val config = new Config((_, _, _) => {
+    case L2ParamKey => L2Param(
+      name = s"l3",
+      ways = 4,
+      // sets = 128,
+      sets = 32,
+      clientCaches = Seq(L1Param(aliasBitsOpt = Some(0))),
+      echoField = Seq(DirtyField())
+    )
+  })
+  val top = DisableMonitors(p => LazyModule(new TestTop_L3()(p)) )(config)
 
   (new ChiselStage).execute(args, Seq(
     ChiselGeneratorAnnotation(() => top.module)

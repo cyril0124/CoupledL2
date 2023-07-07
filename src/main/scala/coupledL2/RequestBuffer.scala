@@ -81,7 +81,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   def sameSet (a: TaskBundle, b: TaskBundle):     Bool = a.set === b.set
   def sameSet (a: TaskBundle, b: MSHRBlockAInfo): Bool = a.set === b.set
   def addrConflict(a: TaskBundle, s: MSHRBlockAInfo): Bool = {
-    a.set === s.set && (a.tag === s.reqTag || a.tag === s.metaTag && s.needRelease)
+    a.set === s.set // && (a.tag === s.reqTag || a.tag === s.metaTag && s.needRelease)
   }
   def conflictMask(a: TaskBundle): UInt = VecInit(io.mshrStatus.map(s =>
     s.valid && addrConflict(a, s.bits) && !s.bits.willFree)).asUInt
@@ -142,7 +142,8 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
 
     entry.valid   := true.B
     // when Addr-Conflict / Same-Addr-Dependent / MainPipe-Block / noFreeWay-in-Set, entry not ready
-    entry.rdy     := !conflict(in) && !mpBlock && !noFreeWay(in) && !s1Block // && !Cat(depMask).orR
+//    entry.rdy     := !conflict(in) && !mpBlock && !noFreeWay(in) && !s1Block // && !Cat(depMask).orR
+    entry.rdy := !conflictWithMSHR && !mainPipeBlock && !noFreeWayWithMSHR && !s1Block
     entry.task    := io.in.bits
     entry.waitMP  := Cat(
       s1Block,

@@ -125,6 +125,26 @@ class MSHR(implicit p: Parameters) extends L2Module {
   io.tasks.mainpipe.valid := mp_release_valid || mp_probeack_valid || mp_grant_valid || mp_put_wb_valid
   // io.tasks.prefetchTrain.foreach(t => t.valid := !state.s_triggerprefetch.getOrElse(true.B))
 
+  val reqClient = getClientBitOH(req.source)
+  assert(PopCount(reqClient) <= 1.U)
+  val clientValid = !(req_get && (!dirResult.hit || meta_no_client || probeGotN))
+  val newClients = reqClient & Fill(clientBits, clientValid)
+  val oldClients = RegInit(0.U(clientBits.W))
+  when(io.alloc.fire) {
+    oldClients := Mux(io.alloc.bits.dirResult.hit, io.alloc.bits.dirResult.meta.clients, 0.U(clientBits.W))
+  }
+  when(io.tasks.source_b.fire && io.tasks.source_b.bits.param === toN) { // Only Probe.toN can remove old client bit
+    oldClients := oldClients & ~io.tasks.source_b.bits.clients
+  }
+//  when(io.resps.sink_c.fire && )
+  val mergedClients = oldClients | newClients
+  dontTouch(reqClient)
+  dontTouch(clientValid)
+  dontTouch(newClients)
+  dontTouch(oldClients)
+  dontTouch(mergedClients)
+
+
   val a_task = {
     val oa = io.tasks.source_a.bits
     oa := DontCare
@@ -162,18 +182,34 @@ class MSHR(implicit p: Parameters) extends L2Module {
     ob.off := 0.U
     ob.opcode := Probe
     // ob.param := Mux(!state.s_pprobe, req.param, toN)
-    ob.param := Mux(
-      !state.s_pprobe,
-      req.param,
-      Mux(
-        req_get && dirResult.hit && meta.state === TRUNK,
-        toB,
-        toN
+    if(cacheParams.name == "l3") {
+      assert(state.s_pprobe)
+
+      ob.param := Mux(
+        !state.s_pprobe, // TODO: remove
+        req.param,
+        Mux(
+          req_get && dirResult.hit && meta.state === TRUNK || req_acquire && dirResult.hit && ! req_needT,
+          toB,
+          toN
+        )
       )
-    )
+    } else {
+      ob.param := Mux(
+        !state.s_pprobe,
+        req.param,
+        Mux(
+          req_get && dirResult.hit && meta.state === TRUNK,
+          toB,
+          toN
+        )
+      )
+    }
     ob.alias.foreach(_ := meta.alias.getOrElse(0.U))
+    ob.clients := dirResult.meta.clients
     ob
   }
+
   val mp_release, mp_probeack, mp_grant, mp_put_wb = Wire(new TaskBundle)
   val mp_release_task = {
     mp_release := DontCare
@@ -207,7 +243,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_release
   }
 
-  val mp_probeack_task = {
+  val mp_probeack_task = { // accept probe and need resp(probeack)
     mp_probeack := DontCare
     mp_probeack.channel := req.channel
     mp_probeack.tag := req.tag
@@ -255,7 +291,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_probeack
   }
 
-  val mp_grant_task    = {
+  val mp_grant_task    = { // mp_grant_task will serve AcquriePrem/AcquireBlock, Get, Hint
     mp_grant := DontCare
     mp_grant.channel := req.channel
     mp_grant.tag := req.tag
@@ -286,35 +322,89 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_grant.aliasTask.foreach(_ := req.aliasTask.getOrElse(false.B))
     // [Alias] write probeData into DS for alias-caused Probe,
     // but not replacement-cased Probe
-    mp_grant.useProbeData := dirResult.hit && req_get || req.aliasTask.getOrElse(false.B)
+    mp_grant.useProbeData := dirResult.hit && ( req_get || probeDirty ) || req.aliasTask.getOrElse(false.B)
+
+//    val new_meta = MetaEntry()
+//    new_meta.dirty := gotDirty || dirResult.hit && (meta.dirty || probeDirty)
+//    new_meta.clients := Mux(
+//      req_prefetch,
+//      Mux(dirResult.hit, meta.clients, Fill(clientBits, false.B)),
+//      mergedClients
+//    )
+//    new_meta.alias.foreach(_ := aliasFinal)
+//    new_meta.prefetch.foreach(_ := req_prefetch || dirResult.hit && meta_pft)
+//    new_meta.accessed := req_acquire || req_get || req_put //[Access] TODO: check
+//    if(cacheParams.name == "l3") {
+////      require(false, "TODO:")
+//      new_meta.state := Mux(
+//        req_get,
+//        Mux(
+//          dirResult.hit,
+//          Mux(isT(meta.state), TIP, BRANCH),
+//          Mux(req_promoteT, TIP, BRANCH)
+//        ),
+//        Mux(
+//          req_promoteT || req_needT,
+//          Mux(req_prefetch, TIP, TRUNK),
+//          BRANCH
+//        )
+//      )
+//      when(status_reg.valid && mp_grant_valid) {
+////        assert(dirResult.hit && isT(meta.state))
+//      }
+//    } else {
+//      new_meta.state := Mux(
+//        req_get,
+//        Mux(
+//          dirResult.hit,
+//          Mux(isT(meta.state), TIP, BRANCH),
+//          Mux(req_promoteT, TIP, BRANCH)
+//        ),
+//        Mux(
+//          req_promoteT || req_needT,
+//          Mux(req_prefetch, TIP, TRUNK),
+//          BRANCH
+//        )
+//      )
+//    }
+//    mp_grant.meta := new_meta
 
     mp_grant.meta := MetaEntry(
-      dirty = gotDirty || dirResult.hit && (meta.dirty || probeDirty),
-      state = Mux(
-        req_get,
-        Mux(
-          dirResult.hit,
-          Mux(isT(meta.state), TIP, BRANCH),
-          Mux(req_promoteT, TIP, BRANCH)
+        dirty = gotDirty || dirResult.hit && (meta.dirty || probeDirty),
+        state = Mux(
+          req_get,
+          Mux(
+            dirResult.hit,
+            Mux(isT(meta.state), TIP, BRANCH),
+            Mux(req_promoteT, TIP, BRANCH)
+          ),
+          Mux(
+            req_promoteT || req_needT,
+            Mux(req_prefetch, TIP, TRUNK),
+            BRANCH
+          )
         ),
-        Mux(
-          req_promoteT || req_needT,
-          Mux(req_prefetch, TIP, TRUNK),
-          BRANCH
-        )
-      ),
-      clients = Mux(
-        req_prefetch,
-        Mux(dirResult.hit, meta.clients, Fill(clientBits, false.B)),
-        Fill(clientBits, !(req_get && (!dirResult.hit || meta_no_client || probeGotN)))
-      ),
-      alias = Some(aliasFinal),
-      prefetch = req_prefetch || dirResult.hit && meta_pft,
-      accessed = req_acquire || req_get || req_put //[Access] TODO: check
+        clients = Mux(
+          req_prefetch,
+          Mux(dirResult.hit, meta.clients, Fill(clientBits, false.B)),
+          if(cacheParams.name == "l3") mergedClients else Fill(clientBits, !(req_get && (!dirResult.hit || meta_no_client || probeGotN)))
+        ),
+        alias = Some(aliasFinal),
+        prefetch = req_prefetch || dirResult.hit && meta_pft,
+        accessed = req_acquire || req_get || req_put //[Access] TODO: check
     )
     mp_grant.metaWen := !req_put
     mp_grant.tagWen := !dirResult.hit && !req_put
-    mp_grant.dsWen := !dirResult.hit && !req_put && gotGrantData || probeDirty && (req_get || req.aliasTask.getOrElse(false.B))
+
+//    if(cacheParams.name == "l3") {
+//      if(cacheParams.inclusionPolicy == "inclusive")
+//        mp_grant.dsWen := !dirResult.hit && gotGrantData || probeDirty && req_get
+//      else if(cacheParams.inclusionPolicy == "NINE") // save data in DS only when cache line is shared from multi-core
+//        mp_grant.dsWen := dirResult.hit && meta.state === TRUNK || !dirResult.hit && req_get
+//    } else {// L2
+//      mp_grant.dsWen := !dirResult.hit && !req_put && gotGrantData || probeDirty && (req_get || req.aliasTask.getOrElse(false.B))
+//    }
+    mp_grant.dsWen := !dirResult.hit && !req_put && gotGrantData || probeDirty && (req_get || req.aliasTask.getOrElse(false.B)) || dirResult.hit && probeDirty
     mp_grant.fromL2pft.foreach(_ := req.fromL2pft.get)
     mp_grant.needHint.foreach(_ := false.B)
     mp_grant
@@ -332,7 +422,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_put_wb.opcodeIsReq := true.B
     mp_put_wb.mshrId := io.id
     mp_put_wb.param := 0.U
-    mp_put_wb.reqSource := req.source
+//    mp_put_wb.reqSource := req.source
     mp_put_wb.sourceId := req.source
     mp_put_wb.pbIdx := req.pbIdx
     mp_put_wb.putHit := dirResult.hit
@@ -403,19 +493,74 @@ class MSHR(implicit p: Parameters) extends L2Module {
   val c_resp = io.resps.sink_c
   val d_resp = io.resps.sink_d
   val e_resp = io.resps.sink_e
-  when (c_resp.valid) {
-    when (c_resp.bits.opcode === ProbeAck || c_resp.bits.opcode === ProbeAckData) {
-      state.w_rprobeackfirst := true.B
-      state.w_rprobeacklast := state.w_rprobeacklast || c_resp.bits.last
-      state.w_pprobeackfirst := true.B
-      state.w_pprobeacklast := state.w_pprobeacklast || c_resp.bits.last
-      state.w_pprobeack := state.w_pprobeack || req.off === 0.U || c_resp.bits.last
+
+  dontTouch(io.resps.sink_c.bits.source)
+
+  val probes_done = RegInit(0.U(clientBits.W))
+  val probe_clients = dirResult.meta.clients
+  val probeack_bit = WireInit(0.U(clientBits.W))
+
+  dontTouch(probeack_bit)
+  dontTouch(probes_done)
+  dontTouch(probe_clients)
+
+  if(cacheParams.name == "l3") {
+    // ! This is the last client sending probeack
+    val probeack_last = (probes_done | probeack_bit) === probe_clients
+    dontTouch(probeack_last)
+
+    when(io.alloc.valid) {
+      probes_done := 0.U
     }
-    when (c_resp.bits.opcode === ProbeAckData) {
-      probeDirty := true.B
+
+    when(c_resp.valid) {
+      probeack_bit := getClientBitOH(io.resps.sink_c.bits.source)
+      when(c_resp.bits.opcode === ProbeAck || c_resp.bits.opcode === ProbeAckData) {
+        probes_done := probes_done | probeack_bit
+        state.w_rprobeackfirst := state.w_rprobeackfirst || probeack_last
+        state.w_rprobeacklast := state.w_rprobeacklast || c_resp.bits.last && probeack_last
+        state.w_pprobeackfirst := state.w_pprobeackfirst || probeack_last
+        state.w_pprobeacklast := state.w_pprobeacklast || c_resp.bits.last && probeack_last
+        state.w_pprobeack := state.w_pprobeack || (req.off === 0.U || c_resp.bits.last) && probeack_last
+      }
+      when(c_resp.bits.opcode === ProbeAckData) {
+        probeDirty := true.B
+      }
+      when(isToN(c_resp.bits.param)) {
+        probeGotN := true.B
+      }
     }
-    when (isToN(c_resp.bits.param)) {
-      probeGotN := true.B
+
+//    when(c_resp.valid) {
+//      when(c_resp.bits.opcode === ProbeAck || c_resp.bits.opcode === ProbeAckData) {
+//        state.w_rprobeackfirst := true.B
+//        state.w_rprobeacklast := state.w_rprobeacklast || c_resp.bits.last
+//        state.w_pprobeackfirst := true.B
+//        state.w_pprobeacklast := state.w_pprobeacklast || c_resp.bits.last
+//        state.w_pprobeack := state.w_pprobeack || req.off === 0.U || c_resp.bits.last
+//      }
+//      when(c_resp.bits.opcode === ProbeAckData) {
+//        probeDirty := true.B
+//      }
+//      when(isToN(c_resp.bits.param)) {
+//        probeGotN := true.B
+//      }
+//    }
+  } else { // L2
+    when(c_resp.valid) {
+      when(c_resp.bits.opcode === ProbeAck || c_resp.bits.opcode === ProbeAckData) {
+        state.w_rprobeackfirst := true.B
+        state.w_rprobeacklast := state.w_rprobeacklast || c_resp.bits.last
+        state.w_pprobeackfirst := true.B
+        state.w_pprobeacklast := state.w_pprobeacklast || c_resp.bits.last
+        state.w_pprobeack := state.w_pprobeack || req.off === 0.U || c_resp.bits.last
+      }
+      when(c_resp.bits.opcode === ProbeAckData) {
+        probeDirty := true.B
+      }
+      when(isToN(c_resp.bits.param)) {
+        probeGotN := true.B
+      }
     }
   }
 

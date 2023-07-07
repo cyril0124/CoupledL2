@@ -52,10 +52,26 @@ class SourceB(implicit p: Parameters) extends L2Module {
     b.opcode  := task.opcode
     b.param   := task.param
     b.size    := offsetBits.U
-    b.source  := 0.U // make sure there are only 1 client
+    if (cacheParams.name  == "l3") {
+      println("Is L3")
+      b.source  := getSourceId(task.clients)
+
+      when(io.sourceB.valid) {
+        assert(PopCount(task.clients) === 1.U)
+      }
+    } else { // L2
+      println("Is L2")
+      b.source  := 0.U // make sure there are only 1 client
+    }
     b.address := Cat(task.tag, task.set, 0.U(offsetBits.W))
     b.mask    := Fill(beatBytes, 1.U(1.W))
-    b.data    := Cat(task.alias.getOrElse(0.U), 0.U(1.W)) // this is the same as HuanCun
+    if (cacheParams.inclusionPolicy == "inclusive") {
+      b.data := Cat(task.alias.getOrElse(0.U), 0.U(1.W)) // this is the same as HuanCun // TODO: for L3
+    } else if(cacheParams.inclusionPolicy == "NINE") {
+      require(false, "TODO: NINE for L3")
+    } else {
+      assert(false, s"Invalid inclusion policy ==> ${cacheParams.inclusionPolicy}")
+    }
     b.corrupt := false.B
     b
   }
@@ -66,6 +82,9 @@ class SourceB(implicit p: Parameters) extends L2Module {
   val probes  = RegInit(VecInit(
     Seq.fill(entries)(0.U.asTypeOf(new ProbeEntry))
   ))
+//  val workVecs = RegInit(VecInit(
+//    Seq.fill(entries)(0.U.asTypeOf(UInt(clientBits.W)))
+//  ))
 
   /* ======== Enchantment ======== */
   val full  = Cat(probes.map(_.valid)).andR
@@ -78,7 +97,7 @@ class SourceB(implicit p: Parameters) extends L2Module {
   val conflict     = Cat(conflictMask).orR
 
   val noReadyEntry = Wire(Bool())
-  val canFlow      = noReadyEntry && !conflict
+  val canFlow      = noReadyEntry && !conflict && PopCount(io.task.bits.clients) === 1.U
   val flow         = canFlow && io.sourceB.ready
 
   /* ======== Alloc ======== */
@@ -93,6 +112,9 @@ class SourceB(implicit p: Parameters) extends L2Module {
     p.waitG := OHToUInt(conflictMask)
     p.task  := io.task.bits
     assert(PopCount(conflictMask) <= 1.U)
+
+//    val workVec = workVecs(insertIdx)
+//    workVec := io.task.bits.clients
   }
 
   /* ======== Issue ======== */
@@ -101,8 +123,16 @@ class SourceB(implicit p: Parameters) extends L2Module {
     case (i, p) =>
       i.valid := p.valid && p.rdy
       i.bits  := p.task
-      when(i.fire) {
+      val pendingClient = p.task.clients
+      val chosenClient = ParallelPriorityMux(pendingClient.asBools.zipWithIndex.map {
+        case (sel, i) => sel -> UIntToOH(i.U, width = clientBits)
+      })
+      i.bits.clients := chosenClient
+      when(i.fire && PopCount(pendingClient) === 1.U) {
         p.valid := false.B
+      }.elsewhen(i.fire) {
+        assert(PopCount(p.task.clients) =/= 1.U)
+        pendingClient := pendingClient & ~chosenClient
       }
   }
   issueArb.io.out.ready := io.sourceB.ready

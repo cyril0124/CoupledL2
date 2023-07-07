@@ -108,7 +108,7 @@ object xsutils extends SbtModule with ScalafmtModule with CommonModule {
 }
 
 object CoupledL2 extends SbtModule with ScalafmtModule with CommonModule {
-
+  def forkArgs  = Seq("-Xmx2G", "-Dscala.concurrent.context.numThreads=16")
   override def millSourcePath = millOuterCtx.millSourcePath
 
 

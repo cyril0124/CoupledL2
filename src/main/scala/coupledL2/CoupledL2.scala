@@ -184,7 +184,21 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
         supports = TLSlaveToMasterTransferSizes(
           probe = xfer
         ),
-        sourceId = IdRange(0, idsAll)
+        sourceId = if(cacheParams.name == "l3"){
+          println(s"[Diplomacy stage] ${cacheParams.name} client num: ${m.masters.length}")
+          println(s"[Diplomacy stage] ${cacheParams.name} client sourceId:")
+          m.masters.zipWithIndex.foreach{case(m, i) => println(s"[Diplomacy stage] \t[${i}]${m.name} => start: ${m.sourceId.start} end: ${m.sourceId.end}")}
+          val idEnd = idsAll
+          println(s"[Diplomacy stage] ${cacheParams.name} sourceId idRange(0, ${idEnd})\n")
+          IdRange(0, idEnd)
+        } else {
+          println(s"[Diplomacy stage] ${cacheParams.name} client num: ${m.masters.length}")
+          println(s"[Diplomacy stage] ${cacheParams.name} client sourceId:")
+          m.masters.zipWithIndex.foreach{case(m, i) => println(s"[Diplomacy stage] \t[${i}]${m.name} => start: ${m.sourceId.start} end: ${m.sourceId.end}")}
+          val idEnd = 64 // TODO：Parameterize
+          println(s"[Diplomacy stage] ${cacheParams.name} sourceId idRange(0, ${idEnd})\n")
+          IdRange(0, idEnd)
+        }
       )
     ),
     channelBytes = cacheParams.channelBytes,

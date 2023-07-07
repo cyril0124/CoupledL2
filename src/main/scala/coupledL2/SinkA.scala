@@ -150,6 +150,7 @@ class SinkA(implicit p: Parameters) extends L2Module {
   s0_valid := s0_full
 
 
+  // TODO: How about put with only one beat?
   val commonReq = Wire(io.toReqArb.cloneType)
   val prefetchReq = prefetchOpt.map(_ => Wire(io.toReqArb.cloneType))
 

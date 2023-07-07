@@ -63,6 +63,7 @@ class RefillUnit(implicit p: Parameters) extends L2Module {
   io.resp.mshrId := io.sinkD.bits.source
   io.resp.set := DontCare
   io.resp.tag := DontCare
+  io.resp.respInfo := DontCare
   io.resp.respInfo.opcode := io.sinkD.bits.opcode
   io.resp.respInfo.param := io.sinkD.bits.param
   io.resp.respInfo.last := last

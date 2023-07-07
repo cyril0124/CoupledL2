@@ -159,6 +159,7 @@ class RespInfoBundle(implicit p: Parameters) extends L2Bundle {
   val param = UInt(3.W)
   val last = Bool() // last beat
   val dirty = Bool() // only used for sinkD resps
+  val source = UInt(mshrBits.W)
 }
 
 class RespBundle(implicit p: Parameters) extends L2Bundle {
@@ -216,6 +217,7 @@ class SourceBReq(implicit p: Parameters) extends L2Bundle {
   val opcode = UInt(3.W)
   val param = UInt(bdWidth.W)
   val alias = aliasBitsOpt.map(_ => UInt(aliasBitsOpt.get.W))
+  val clients = UInt(clientBits.W)
 }
 
 class BlockInfo(implicit p: Parameters) extends L2Bundle {
