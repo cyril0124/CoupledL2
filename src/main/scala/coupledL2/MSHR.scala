@@ -125,6 +125,12 @@ class MSHR(implicit p: Parameters) extends L2Module {
   io.tasks.mainpipe.valid := mp_release_valid || mp_probeack_valid || mp_grant_valid || mp_put_wb_valid
   // io.tasks.prefetchTrain.foreach(t => t.valid := !state.s_triggerprefetch.getOrElse(true.B))
 
+  if(cacheParams.name == "l3") {
+    when(status_reg.valid) {
+      assert(!mp_probeack_valid, s"L3 will not schedule probe ack task! mshrId:%d set:0x%x tag:0x%x", io.id, status_reg.bits.set, status_reg.bits.tag)
+    }
+  }
+
   val reqClient = getClientBitOH(req.source)
   assert(PopCount(reqClient) <= 1.U)
   val clientValid = !(req_get && (!dirResult.hit || meta_no_client || probeGotN))

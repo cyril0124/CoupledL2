@@ -81,7 +81,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   def sameSet (a: TaskBundle, b: TaskBundle):     Bool = a.set === b.set
   def sameSet (a: TaskBundle, b: MSHRBlockAInfo): Bool = a.set === b.set
   def addrConflict(a: TaskBundle, s: MSHRBlockAInfo): Bool = {
-    a.set === s.set // && (a.tag === s.reqTag || a.tag === s.metaTag && s.needRelease)
+    a.set === s.set && (a.tag === s.reqTag || a.tag === s.metaTag && s.needRelease)
   }
   def conflictMask(a: TaskBundle): UInt = VecInit(io.mshrStatus.map(s =>
     s.valid && addrConflict(a, s.bits) && !s.bits.willFree)).asUInt
