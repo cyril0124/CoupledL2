@@ -225,14 +225,14 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   val need_probe_s3_a = if (cacheParams.name == "l3") {
     val is_a_req = req_get_s3 || req_put_s3 || req_acquire_s3
     val probe_on_miss_s3 = is_a_req && meta_s3.state =/= INVALID && meta_has_clients_s3
-    val probe_on_hit_s3 = is_a_req && meta_s3.state === TRUNK || is_a_req && req_needT_s3 && meta_s3.state === TIP && meta_has_clients_s3
+    val probe_on_hit_s3 = is_a_req && ( !req_needT_s3 && meta_s3.state === TRUNK || req_needT_s3 && meta_has_clients_s3 )
     Mux(dirResult_s3.hit, probe_on_hit_s3, probe_on_miss_s3)
   } else { // L2
     (req_get_s3 || req_put_s3) && dirResult_s3.hit && meta_s3.state === TRUNK
   }
 
   if (cacheParams.name == "l3") {
-       assert(RegNext(!(task_s3.valid && !mshr_req_s3 && dirResult_s3.hit && meta_s3.state === BRANCH)), "L3 cannot have BRANCH state")
+    assert(RegNext(!(task_s3.valid && !mshr_req_s3 && dirResult_s3.hit && meta_s3.state === BRANCH)), "L3 cannot have BRANCH state")
   }
 
   assert(RegNext(!(task_s3.valid && !mshr_req_s3 && dirResult_s3.hit && meta_s3.state === TRUNK && !meta_s3.clients.orR)),

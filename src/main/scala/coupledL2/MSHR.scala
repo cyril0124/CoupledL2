@@ -364,17 +364,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
       new_meta.state := Mux(
         req_get,
         TIP,
-//        Mux(
-//          dirResult.hit,
-//          Mux(isT(meta.state), TIP, BRANCH),
-//          Mux(req_promoteT, TIP, BRANCH)
-//        ),
-        Mux(req_prefetch, TIP, Mux(meta_no_client, TRUNK, TIP)),
-//        Mux(
-//          req_promoteT || req_needT,
-//          Mux(req_prefetch, TIP, TRUNK),
-//          BRANCH
-//        )
+        Mux(req_prefetch, TIP, Mux(meta_no_client || !dirResult.hit, TRUNK, TIP)),
       )
 
       when(status_reg.valid && mp_grant_valid && dirResult.hit) {
@@ -388,56 +378,24 @@ class MSHR(implicit p: Parameters) extends L2Module {
       )
 
       new_meta.state := Mux(
-        req_get,
-        Mux(
-          dirResult.hit,
-          Mux(isT(meta.state), TIP, BRANCH),
-          Mux(req_promoteT, TIP, BRANCH)
-        ),
-        Mux(
-          req_promoteT || req_needT,
-          Mux(req_prefetch, TIP, TRUNK),
-          BRANCH
-        )
+          req_get,
+          Mux(
+            dirResult.hit,
+            Mux(isT(meta.state), TIP, BRANCH),
+            Mux(req_promoteT, TIP, BRANCH)
+          ),
+          Mux(
+            req_promoteT || req_needT,
+            Mux(req_prefetch, TIP, TRUNK),
+            BRANCH
+          )
       )
     }
     mp_grant.meta := new_meta
 
-//    mp_grant.meta := MetaEntry(
-//        dirty = gotDirty || dirResult.hit && (meta.dirty || probeDirty),
-//        state = Mux(
-//          req_get,
-//          Mux(
-//            dirResult.hit,
-//            Mux(isT(meta.state), TIP, BRANCH),
-//            Mux(req_promoteT, TIP, BRANCH)
-//          ),
-//          Mux(
-//            req_promoteT || req_needT,
-//            Mux(req_prefetch, TIP, TRUNK),
-//            BRANCH
-//          )
-//        ),
-//        clients = Mux(
-//          req_prefetch,
-//          Mux(dirResult.hit, meta.clients, Fill(clientBits, false.B)),
-//          if(cacheParams.name == "l3") mergedClients else Fill(clientBits, !(req_get && (!dirResult.hit || meta_no_client || probeGotN)))
-//        ),
-//        alias = Some(aliasFinal),
-//        prefetch = req_prefetch || dirResult.hit && meta_pft,
-//        accessed = req_acquire || req_get || req_put //[Access] TODO: check
-//    )
     mp_grant.metaWen := !req_put
     mp_grant.tagWen := !dirResult.hit && !req_put
 
-//    if(cacheParams.name == "l3") {
-//      if(cacheParams.inclusionPolicy == "inclusive")
-//        mp_grant.dsWen := !dirResult.hit && gotGrantData || probeDirty && req_get
-//      else if(cacheParams.inclusionPolicy == "NINE") // save data in DS only when cache line is shared from multi-core
-//        mp_grant.dsWen := dirResult.hit && meta.state === TRUNK || !dirResult.hit && req_get
-//    } else {// L2
-//      mp_grant.dsWen := !dirResult.hit && !req_put && gotGrantData || probeDirty && (req_get || req.aliasTask.getOrElse(false.B))
-//    }
     mp_grant.dsWen := !dirResult.hit && !req_put && gotGrantData || probeDirty && (req_get || req.aliasTask.getOrElse(false.B)) || dirResult.hit && probeDirty
     mp_grant.fromL2pft.foreach(_ := req.fromL2pft.get)
     mp_grant.needHint.foreach(_ := false.B)
@@ -564,22 +522,6 @@ class MSHR(implicit p: Parameters) extends L2Module {
         probeGotN := true.B
       }
     }
-
-//    when(c_resp.valid) {
-//      when(c_resp.bits.opcode === ProbeAck || c_resp.bits.opcode === ProbeAckData) {
-//        state.w_rprobeackfirst := true.B
-//        state.w_rprobeacklast := state.w_rprobeacklast || c_resp.bits.last
-//        state.w_pprobeackfirst := true.B
-//        state.w_pprobeacklast := state.w_pprobeacklast || c_resp.bits.last
-//        state.w_pprobeack := state.w_pprobeack || req.off === 0.U || c_resp.bits.last
-//      }
-//      when(c_resp.bits.opcode === ProbeAckData) {
-//        probeDirty := true.B
-//      }
-//      when(isToN(c_resp.bits.param)) {
-//        probeGotN := true.B
-//      }
-//    }
   } else { // L2
     when(c_resp.valid) {
       when(c_resp.bits.opcode === ProbeAck || c_resp.bits.opcode === ProbeAckData) {
