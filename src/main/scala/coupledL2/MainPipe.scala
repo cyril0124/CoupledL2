@@ -155,10 +155,10 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   }
 
   //  TODO: debug address consider multi-bank
-  def toDebugAddr(set: UInt, tag: UInt) = {
+  def restoreAddr(set: UInt, tag: UInt) = {
     (set << offsetBits).asUInt + (tag << (setBits + offsetBits)).asUInt
   }
-  val debug_addr_s3 = toDebugAddr(task_s3.bits.set, task_s3.bits.tag) // (task_s3.bits.set << offsetBits).asUInt + (task_s3.bits.tag << (setBits + offsetBits)).asUInt
+  val debug_addr_s3 = restoreAddr(task_s3.bits.set, task_s3.bits.tag) // (task_s3.bits.set << offsetBits).asUInt + (task_s3.bits.tag << (setBits + offsetBits)).asUInt
   dontTouch(debug_addr_s3)
 
   /* ======== Enchantment ======== */
@@ -443,13 +443,22 @@ class MainPipe(implicit p: Parameters) extends L2Module {
     meta_s3.alias.getOrElse(0.U),
     req_s3.alias.getOrElse(0.U)
   )
-  val metaW_s3_a = MetaEntry(
-    meta_s3.dirty,
-    Mux(req_needT_s3 || sink_resp_s3_a_promoteT, TRUNK, meta_s3.state),
-    Fill(clientBits, true.B),
-    Some(metaW_s3_a_alias),
-    accessed = true.B
-  )
+  val metaW_s3_a = if(cacheParams.name == "l3")
+                      MetaEntry(
+                        meta_s3.dirty,
+                        Mux(req_needT_s3 || sink_resp_s3_a_promoteT, TRUNK, meta_s3.state),
+                        meta_s3.clients,
+                        Some(metaW_s3_a_alias),
+                        accessed = true.B
+                      )
+                    else
+                      MetaEntry(
+                        meta_s3.dirty,
+                        Mux(req_needT_s3 || sink_resp_s3_a_promoteT, TRUNK, meta_s3.state),
+                        Fill(clientBits, true.B),
+                        Some(metaW_s3_a_alias),
+                        accessed = true.B
+                      )
   val metaW_s3_b = Mux(req_s3.param === toN, MetaEntry(),
     MetaEntry(false.B, BRANCH, meta_s3.clients, meta_s3.alias, accessed = meta_s3.accessed))
 
