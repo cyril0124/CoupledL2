@@ -240,9 +240,11 @@ class MainPipe(implicit p: Parameters) extends L2Module {
 
   val need_mshr_s3_a = need_acquire_s3_a || need_probe_s3_a || cache_alias || req_put_partial_s3
   // For channel B reqs, alloc mshr when Probe hits in both self and client dir
-  val need_mshr_s3_b = dirResult_s3.hit && req_s3.fromB &&
-    !(meta_s3.state === BRANCH && req_s3.param === toB) &&
-    meta_has_clients_s3
+  val need_mshr_s3_b = if(cacheParams.name == "l3")
+                          req_s3.fromProbeHelper
+                       else
+                          dirResult_s3.hit && req_s3.fromB && !(meta_s3.state === BRANCH && req_s3.param === toB) && meta_has_clients_s3
+
 
   // For channel C reqs, Release will always hit on MainPipe, no need for MSHR
   val need_mshr_s3 = (need_mshr_s3_a || need_mshr_s3_b) && !meta_error_s3
@@ -705,56 +707,95 @@ class MainPipe(implicit p: Parameters) extends L2Module {
     "s2 and s3 task same set, failed in blocking")
 
   /* ======== Other Signals Assignment ======== */
-  // Initial state assignment
-  // ! Caution: s_ and w_ are false-as-valid
-  when(req_s3.fromA) {
-    alloc_state.s_refill := req_put_s3 && dirResult_s3.hit // put request will not cause refill and grnatAck
-    alloc_state.w_grantack := req_prefetch_s3 || req_get_s3 || req_put_s3
-    alloc_state.s_put_wb := !req_put_s3
-    // need replacement
-    when(a_need_replacement) {
-      alloc_state.w_releaseack := false.B
-      alloc_state.w_release_sent := false.B
-      // need rprobe for release
-      when(meta_has_clients_s3) {
-        alloc_state.s_release := false.B // release when rprobe is sent in MSHR
+  if(cacheParams.name == "l3") {
+    when(req_s3.fromA) {
+      alloc_state.s_refill := req_put_s3 && dirResult_s3.hit // put request will not cause refill and grnatAck
+      alloc_state.w_grantack := req_prefetch_s3 || req_get_s3 || req_put_s3
+      alloc_state.s_put_wb := !req_put_s3
+      // need replacement
+      when(a_need_replacement) {
+        alloc_state.w_releaseack := false.B
+        alloc_state.w_release_sent := false.B
+        // need rprobe for release
+        when(meta_has_clients_s3) {
+          alloc_state.s_release := false.B // release when rprobe is sent in MSHR
+          alloc_state.s_rprobe := false.B
+          alloc_state.w_rprobeackfirst := false.B
+          alloc_state.w_rprobeacklast := false.B
+        }
+      }.otherwise {
+        alloc_state.w_release_sent := alloc_state.s_acquire || alloc_state.s_release
+        assert(alloc_state.s_acquire || alloc_state.s_release)
+      }
+      // need Acquire downwards
+      when(need_acquire_s3_a) {
+        alloc_state.s_acquire := false.B
+        alloc_state.w_grantfirst := false.B
+        alloc_state.w_grantlast := false.B
+        alloc_state.w_grant := false.B
+      }
+      // need Probe for alias
+      // need Probe when Get hits on a TRUNK block
+      when(cache_alias || need_probe_s3_a) {
         alloc_state.s_rprobe := false.B
         alloc_state.w_rprobeackfirst := false.B
         alloc_state.w_rprobeacklast := false.B
       }
-    }.otherwise {
-      alloc_state.w_release_sent := alloc_state.s_acquire || alloc_state.s_release
-      assert(alloc_state.s_acquire || alloc_state.s_release)
     }
-    // need Acquire downwards
-//    when(need_acquire_s3_a || req_put_s3) {
-    when(need_acquire_s3_a) {
-      alloc_state.s_acquire := false.B
-      alloc_state.w_grantfirst := false.B
-      alloc_state.w_grantlast := false.B
-      alloc_state.w_grant := false.B
+    when(req_s3.fromB) {
+      // Only consider the situation when mshr needs to be allocated
+      alloc_state.s_pprobe := false.B
+      alloc_state.w_pprobeackfirst := false.B
+      alloc_state.w_pprobeacklast := false.B
+      alloc_state.w_pprobeack := false.B
+      alloc_state.s_probeack := false.B
     }
-    // need Probe for alias
-    // need Probe when Get hits on a TRUNK block
-    when(cache_alias || need_probe_s3_a) {
-      alloc_state.s_rprobe := false.B
-      alloc_state.w_rprobeackfirst := false.B
-      alloc_state.w_rprobeacklast := false.B
+  } else {
+    // Initial state assignment
+    // ! Caution: s_ and w_ are false-as-valid
+    when(req_s3.fromA) {
+      // TODO: L2: remove put logic
+      alloc_state.s_refill := req_put_s3 && dirResult_s3.hit // put request will not cause refill and grnatAck
+      alloc_state.w_grantack := req_prefetch_s3 || req_get_s3 || req_put_s3
+      alloc_state.s_put_wb := !req_put_s3
+      // need replacement
+      when(a_need_replacement) {
+        alloc_state.w_releaseack := false.B
+        alloc_state.w_release_sent := false.B
+        // need rprobe for release
+        when(meta_has_clients_s3) {
+          alloc_state.s_release := false.B // release when rprobe is sent in MSHR
+          alloc_state.s_rprobe := false.B
+          alloc_state.w_rprobeackfirst := false.B
+          alloc_state.w_rprobeacklast := false.B
+        }
+      }.otherwise {
+        alloc_state.w_release_sent := alloc_state.s_acquire || alloc_state.s_release
+        assert(alloc_state.s_acquire || alloc_state.s_release)
+      }
+      // need Acquire downwards
+      when(need_acquire_s3_a) {
+        alloc_state.s_acquire := false.B
+        alloc_state.w_grantfirst := false.B
+        alloc_state.w_grantlast := false.B
+        alloc_state.w_grant := false.B
+      }
+      // need Probe for alias
+      // need Probe when Get hits on a TRUNK block
+      when(cache_alias || need_probe_s3_a) {
+        alloc_state.s_rprobe := false.B
+        alloc_state.w_rprobeackfirst := false.B
+        alloc_state.w_rprobeacklast := false.B
+      }
     }
-    // need trigger a prefetch, send PrefetchTrain msg to Prefetcher
-    // prefetchOpt.foreach {_ =>
-    //   when (req_s3.fromA && req_s3.needHint.getOrElse(false.B) && (!dirResult_s3.hit || meta_s3.prefetch.get)) {
-    //     alloc_state.s_triggerprefetch.foreach(_ := false.B)
-    //   }
-    // }
-  }
-  when(req_s3.fromB) {
-    // Only consider the situation when mshr needs to be allocated
-    alloc_state.s_pprobe := false.B
-    alloc_state.w_pprobeackfirst := false.B
-    alloc_state.w_pprobeacklast := false.B
-    alloc_state.w_pprobeack := false.B
-    alloc_state.s_probeack := false.B
+    when(req_s3.fromB) {
+      // Only consider the situation when mshr needs to be allocated
+      alloc_state.s_pprobe := false.B
+      alloc_state.w_pprobeackfirst := false.B
+      alloc_state.w_pprobeacklast := false.B
+      alloc_state.w_pprobeack := false.B
+      alloc_state.s_probeack := false.B
+    }
   }
 
   val c = Seq(c_s5, c_s4, c_s3)

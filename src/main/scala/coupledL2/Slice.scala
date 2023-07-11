@@ -25,6 +25,7 @@ import freechips.rocketchip.util.leftOR
 import chipsalliance.rocketchip.config.Parameters
 import coupledL2.utils._
 import coupledL2.debug._
+import coupledL2.noninclusive.ProbeHelper
 import coupledL2.prefetch.PrefetchIO
 import utility.RegNextN
 
@@ -52,6 +53,33 @@ class Slice()(implicit p: Parameters) extends L2Module with DontCareInnerLogic {
   val refillBuf = Module(new MSHRBuffer(wPorts = 2))
   val releaseBuf = Module(new MSHRBuffer(wPorts = 3))
   val putDataBuf = Module(new LookupBuffer(entries = lookupBufEntries))
+
+  reqArb.io.probeHelperTask.get <> DontCare
+  reqArb.io.probeHelperTask.get.valid := false.B
+  val probeHelperOpt = if (cacheParams.inclusionPolicy == "NINE") Some(Module(new ProbeHelper(entries = 5, enqDelay = 1))) else None
+  val clientDirectoryOpt = if (cacheParams.inclusionPolicy == "NINE") Some(Module(new noninclusive.ClientDirectory())) else None
+
+  probeHelperOpt.foreach{
+    probeHelper =>
+      // We will get client directory result after 2 cyels of delay
+      probeHelper.io.dirResult.valid := RegNextN(reqArb.io.dirRead_s1.valid, 2, Some(false.B)) // TODO: Optimize for clock gate
+      probeHelper.io.dirResult.bits := clientDirectoryOpt.get.io.resp
+//      probeHelper.io.full // TODO: block sinkA
+
+      reqArb.io.probeHelperTask.get <> probeHelper.io.task
+  }
+
+  clientDirectoryOpt.foreach{
+    clientDirectory =>
+      clientDirectory.io.read <> DontCare
+      clientDirectory.io.tagWReq <> DontCare
+      clientDirectory.io.metaWReq <> DontCare
+
+      clientDirectory.io.read.valid := reqArb.io.dirRead_s1.valid
+      clientDirectory.io.read.bits.set := reqArb.io.dirRead_s1.bits.set
+      clientDirectory.io.read.bits.tag := reqArb.io.dirRead_s1.bits.tag
+      clientDirectory.io.read.bits.replacerInfo := reqArb.io.dirRead_s1.bits.replacerInfo
+  }
 
   val prbq = Module(new ProbeQueue())
   prbq.io <> DontCare // @XiaBin TODO

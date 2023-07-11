@@ -39,6 +39,7 @@ class RequestArb(implicit p: Parameters) extends L2Module {
     val sinkB    = Flipped(DecoupledIO(new TLBundleB(edgeOut.bundle)))
     val sinkC    = Flipped(DecoupledIO(new TaskBundle))
     val mshrTask = Flipped(DecoupledIO(new TaskBundle))
+    val probeHelperTask = if(cacheParams.inclusionPolicy == "NINE") Some(Flipped(DecoupledIO(new TaskBundle))) else None
 
     /* read/write directory */
     val dirRead_s1 = DecoupledIO(new DirRead())  // To directory, read meta/tag
@@ -67,7 +68,6 @@ class RequestArb(implicit p: Parameters) extends L2Module {
       val blockMSHRReqEntrance = Bool()
     })
   })
-
   /* ======== Reset ======== */
   val resetFinish = RegInit(false.B)
   val resetIdx = RegInit((cacheParams.sets - 1).U)
@@ -118,25 +118,43 @@ class RequestArb(implicit p: Parameters) extends L2Module {
   /* Channel interaction from s1 */
   val A_task = io.sinkA.bits
   val B_task = fromTLBtoTaskBundle(io.sinkB.bits)
+  val probeHelper_task = io.probeHelperTask.getOrElse(0.U.asTypeOf(Decoupled(new TaskBundle))).bits
   val C_task = io.sinkC.bits
   val block_A = io.fromMSHRCtl.blockA_s1 || io.fromMainPipe.blockA_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockA_s1
   val block_B = io.fromMSHRCtl.blockB_s1 || io.fromMainPipe.blockB_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockB_s1
   val block_C = io.fromMSHRCtl.blockC_s1 || io.fromMainPipe.blockC_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockC_s1
 
-  val sinkValids = VecInit(Seq(
-    io.sinkC.valid && !block_C,
-    io.sinkB.valid && !block_B,
-    io.sinkA.valid && !block_A
-  )).asUInt
+
+  val sinkC_valid = io.sinkC.valid && !block_C
+  val sinkB_valid = io.sinkB.valid && !block_B
+  val sinkA_valid = io.sinkA.valid && !block_A
+  val sinkValids = if(cacheParams.inclusionPolicy == "NINE")
+                      VecInit(Seq(
+                        sinkC_valid,
+                        io.probeHelperTask.get.valid && !block_B,
+                        sinkB_valid,
+                        sinkA_valid
+                      )).asUInt
+                    else
+                      VecInit(Seq(
+                        sinkC_valid,
+                        sinkB_valid,
+                        sinkA_valid
+                      )).asUInt
 
   val sink_ready_basic = io.dirRead_s1.ready && resetFinish && !mshr_task_s1.valid
-  io.sinkA.ready := sink_ready_basic && !block_A && !sinkValids(1) && !sinkValids(0) // SinkC prior to SinkA & SinkB
-  io.sinkB.ready := sink_ready_basic && !block_B && !sinkValids(0) // SinkB prior to SinkA
+  val sinkB_ready = sink_ready_basic && !block_B && !sinkC_valid
+  val probeHelperValid = io.probeHelperTask.getOrElse(0.U.asTypeOf(Decoupled(new TaskBundle))).valid
+  val probeHelperFire = probeHelperValid & sinkB_ready
+  io.sinkA.ready := sink_ready_basic && !block_A && !sinkB_valid && !sinkC_valid // SinkC prior to SinkA & SinkB
+  io.sinkB.ready := sinkB_ready && !probeHelperValid // SinkB prior to SinkA
+  io.probeHelperTask.foreach( p => p.ready := sinkB_ready ) // TODO:
   io.sinkC.ready := sink_ready_basic && !block_C
 
   val chnl_task_s1 = Wire(Valid(new TaskBundle()))
+  val taskVec = if(cacheParams.inclusionPolicy == "NINE") Seq(C_task, probeHelper_task, B_task, A_task) else Seq(C_task, B_task, A_task)
   chnl_task_s1.valid := io.dirRead_s1.ready && sinkValids.orR && resetFinish
-  chnl_task_s1.bits := ParallelPriorityMux(sinkValids, Seq(C_task, B_task, A_task))
+  chnl_task_s1.bits := ParallelPriorityMux(sinkValids, taskVec)
 
   // mshr_task_s1 is s1_[reg]
   // task_s1 is [wire] to s2_reg
@@ -155,9 +173,28 @@ class RequestArb(implicit p: Parameters) extends L2Module {
   io.dirRead_s1.bits.replacerInfo.reqSource := task_s1.bits.reqSource
 
   // probe block same-set A req for s2/s3
-  io.sinkEntrance.valid := io.sinkB.fire || io.sinkC.fire
-  io.sinkEntrance.bits.tag  := Mux(io.sinkC.fire, C_task.tag, B_task.tag)
-  io.sinkEntrance.bits.set  := Mux(io.sinkC.fire, C_task.set, B_task.set)
+  io.sinkEntrance.valid := io.sinkB.fire || io.sinkC.fire || probeHelperFire
+//  io.sinkEntrance.bits.tag  := Mux(io.sinkC.fire, C_task.tag, B_task.tag)
+//  io.sinkEntrance.bits.set  := Mux(io.sinkC.fire, C_task.set, B_task.set)
+
+  val sink_tag = if (cacheParams.inclusionPolicy == "NINE")
+                    PriorityMux(Seq(
+                      io.sinkC.fire -> C_task.tag,
+                      probeHelperFire -> probeHelper_task.tag,
+                      io.sinkB.fire -> B_task.tag
+                    ))
+                  else
+                    Mux(io.sinkC.fire, C_task.tag, B_task.tag)
+  val sink_set = if (cacheParams.inclusionPolicy == "NINE")
+                    PriorityMux(Seq(
+                      io.sinkC.fire -> C_task.set,
+                      probeHelperFire -> probeHelper_task.set,
+                      io.sinkB.fire -> B_task.set
+                    ))
+                  else
+                    Mux(io.sinkC.fire, C_task.set, B_task.set)
+  io.sinkEntrance.bits.tag  := sink_tag
+  io.sinkEntrance.bits.set  := sink_set
 
   /* ========  Stage 2 ======== */
   val task_s2 = RegInit(0.U.asTypeOf(task_s1))

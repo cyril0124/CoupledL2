@@ -68,7 +68,8 @@ class SourceB(implicit p: Parameters) extends L2Module {
     if (cacheParams.inclusionPolicy == "inclusive") {
       b.data := Cat(task.alias.getOrElse(0.U), 0.U(1.W)) // this is the same as HuanCun // TODO: for L3
     } else if(cacheParams.inclusionPolicy == "NINE") {
-      require(false, "TODO: NINE for L3")
+//      require(false, "TODO: NINE for L3")
+      b.data := Cat(task.alias.getOrElse(0.U), 0.U(1.W)) // this is the same as HuanCun // TODO: for L3
     } else {
       assert(false, s"Invalid inclusion policy ==> ${cacheParams.inclusionPolicy}")
     }

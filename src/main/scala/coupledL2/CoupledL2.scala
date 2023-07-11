@@ -59,6 +59,8 @@ trait HasCoupledL2Parameters {
   val tagEccCode = cacheParams.tagEccCode
   val tagEccEnable = tagEccCode != None && tagEccCode != Some("none")
 
+  val enableDebug = cacheParams.enableDebug
+
 
   // 1 cycle for sram read, and latch for another cycle
   val sramLatency = 2

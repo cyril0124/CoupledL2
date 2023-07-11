@@ -257,6 +257,9 @@ class Directory(implicit p: Parameters) extends L2Module with DontCareInnerLogic
     chosenWay,
     PriorityEncoder(reqReg.wayMask)
   )
+  when(reqValidReg) {
+    assert(PopCount(reqReg.wayMask) >= 1.U, "Make sure we have at least one way to use.")
+  }
 
   hit_s2 := Cat(hitVec).orR
   way_s2 := Mux(hit_s2, hitWay, finalWay)
@@ -292,9 +295,9 @@ class Directory(implicit p: Parameters) extends L2Module with DontCareInnerLogic
   dontTouch(metaArray.io)
   dontTouch(tagArray.io)
 
-  io.read.ready := !io.metaWReq.valid && !io.tagWReq.valid && !replacerWen
+  io.read.ready := !io.metaWReq.valid && !io.tagWReq.valid && !replacerWen // TODO: ??
   val replacerRready = if(cacheParams.replacement == "random") true.B else replacer_sram_opt.get.io.r.req.ready
-  io.read.ready := tagArray.io.r.req.ready && metaArray.io.r.req.ready && replacerRready
+  io.read.ready := tagArray.io.r.req.ready && metaArray.io.r.req.ready && replacerRready // TODO: ??
 
   val update = reqReg.replacerInfo.channel(0) && (reqReg.replacerInfo.opcode === TLMessages.AcquirePerm || reqReg.replacerInfo.opcode === TLMessages.AcquireBlock)
   when(reqValidReg && update) {

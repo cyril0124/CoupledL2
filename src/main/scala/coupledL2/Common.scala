@@ -62,6 +62,8 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {
   val aliasTask = aliasBitsOpt.map(_ => Bool()) // Anti-alias
   val useProbeData = Bool()               // data source, true for ReleaseBuf and false for RefillBuf
 
+  val fromProbeHelper = Bool()
+
   // For Put
   val pbIdx = UInt(mshrBits.W)
   val putHit = Bool()

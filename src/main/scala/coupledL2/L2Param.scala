@@ -90,13 +90,15 @@ case class L2Param
   enableClockGate: Boolean = true,
   dataEccCode: Option[String] = Some("secded"), // Option: "none", "identity", "parity", "sec", "secded"
   tagEccCode: Option[String] = Some("secded"),
-  inclusionPolicy: String = "inclusive", // inclusive, NINE(Non-inclusive Non-exclusive)
+  inclusionPolicy: String = "NINE", // inclusive, NINE(Non-inclusive Non-exclusive)
   releaseData: Int = 3,
   /* 0 for dirty alone
    * 1 for dirty and accessed
    * 2 for all except prefetch & !accessed
    * 3 for all
    */
+
+  enableDebug: Boolean = true,
 
   // Client (these are set in Configs.scala in XiangShan)
   echoField: Seq[BundleFieldBase] = Nil,

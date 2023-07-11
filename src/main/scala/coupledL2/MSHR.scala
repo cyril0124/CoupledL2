@@ -353,7 +353,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     new_meta.prefetch.foreach(_ := req_prefetch || dirResult.hit && meta_pft)
     new_meta.accessed := req_acquire || req_get || req_put //[Access] TODO: check
     if(cacheParams.name == "l3") {
-      require(cacheParams.inclusionPolicy == "inclusive")
+//      require(cacheParams.inclusionPolicy == "inclusive")
 
       new_meta.clients := Mux(
         req_prefetch,
