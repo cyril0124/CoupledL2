@@ -54,8 +54,6 @@ class Slice()(implicit p: Parameters) extends L2Module with DontCareInnerLogic {
   val releaseBuf = Module(new MSHRBuffer(wPorts = 3))
   val putDataBuf = Module(new LookupBuffer(entries = lookupBufEntries))
 
-  reqArb.io.probeHelperTask.get <> DontCare
-  reqArb.io.probeHelperTask.get.valid := false.B
   val probeHelperOpt = if (cacheParams.inclusionPolicy == "NINE") Some(Module(new ProbeHelper(entries = 5, enqDelay = 1))) else None
   val clientDirectoryOpt = if (cacheParams.inclusionPolicy == "NINE") Some(Module(new noninclusive.ClientDirectory())) else None
 
@@ -67,6 +65,7 @@ class Slice()(implicit p: Parameters) extends L2Module with DontCareInnerLogic {
 //      probeHelper.io.full // TODO: block sinkA
 
       reqArb.io.probeHelperTask.get <> probeHelper.io.task
+//      reqArb.io.probeHelperTask.get.valid := false.B
   }
 
   clientDirectoryOpt.foreach{

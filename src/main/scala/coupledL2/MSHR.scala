@@ -61,18 +61,28 @@ class MSHR(implicit p: Parameters) extends L2Module {
   val state = RegInit(new FSMState(), initState)
   initState.elements.foreach(_._2 := true.B)
   val dirResult = RegInit(0.U.asTypeOf(new DirResult()))
+
   val gotT = RegInit(false.B) // TODO: L3 might return T even though L2 wants B
   val gotDirty = RegInit(false.B)
   val gotGrantData = RegInit(false.B)
+
   val probeDirty = RegInit(false.B)
   val probeGotN = RegInit(false.B)
+
+  // nested C info
+  val nestedRelease = RegInit(false.B)
+  val nestedReleaseClientOH = RegInit(0.U(clientBits.W))
 
   val timer = RegInit(0.U(64.W)) // for performance analysis
 
   /* MSHR Allocation */
   val status_reg = RegInit(0.U.asTypeOf(Valid(new MSHRStatus())))
   val req        = status_reg.bits
+  val reqClientOH = getClientBitOH(req.source)
+  val clientsExceptReqClientOH = dirResult.meta.clients & ~reqClientOH 
   val meta       = dirResult.meta
+  
+  assert(PopCount(reqClientOH) <= 1.U)
 
   when(io.alloc.valid) {
     status_reg.valid := true.B
@@ -96,8 +106,11 @@ class MSHR(implicit p: Parameters) extends L2Module {
     req.reqSource := msTask.reqSource
     gotT        := false.B
     gotDirty    := false.B
+    gotGrantData := false.B
     probeDirty  := false.B
     probeGotN   := false.B
+    nestedRelease     := false.B
+    nestedReleaseClientOH := 0.U
     timer       := 1.U
   }
 
@@ -117,7 +130,11 @@ class MSHR(implicit p: Parameters) extends L2Module {
   /* ======== Task allocation ======== */
   // Theoretically, data to be released is saved in ReleaseBuffer, so Acquire can be sent as soon as req enters mshr
   io.tasks.source_a.valid := !state.s_acquire && state.s_release && state.w_release_sent
-  io.tasks.source_b.valid := !state.s_pprobe || !state.s_rprobe
+  if(cacheParams.name == "l3") {
+    io.tasks.source_b.valid := (!state.s_pprobe || !state.s_rprobe) && io.tasks.source_b.bits.clients.orR
+  } else {
+    io.tasks.source_b.valid := !state.s_pprobe || !state.s_rprobe
+  }
   val mp_release_valid = !state.s_release && state.w_rprobeacklast
   val mp_probeack_valid = !state.s_probeack && state.w_pprobeacklast
   val mp_grant_valid = !state.s_refill && state.w_grantlast && state.w_rprobeacklast && state.s_release && !req_put// [Alias] grant after rprobe done
@@ -131,24 +148,28 @@ class MSHR(implicit p: Parameters) extends L2Module {
     }
   }
 
-  val reqClient = getClientBitOH(req.source)
-  assert(PopCount(reqClient) <= 1.U)
+  
+  /* ======== Deal with clients ======== */
+  val probeClientsOH = Mux(dirResult.hit, dirResult.meta.clients & ~reqClientOH, dirResult.meta.clients)
   val clientValid = !(req_get && (!dirResult.hit || meta_no_client || probeGotN))
-  val newClients = reqClient & Fill(clientBits, clientValid)
-  val oldClients = RegInit(0.U(clientBits.W))
-  when(io.alloc.fire) {
-    oldClients := Mux(io.alloc.bits.dirResult.hit, io.alloc.bits.dirResult.meta.clients, 0.U(clientBits.W))
+  val newClientsOH = reqClientOH & Fill(clientBits, clientValid)
+  val oldClientsOH = RegInit(0.U(clientBits.W))
+
+  when(io.alloc.fire) { 
+    oldClientsOH := Mux(io.alloc.bits.dirResult.hit, io.alloc.bits.dirResult.meta.clients, 0.U(clientBits.W))
   }
+
   when(io.tasks.source_b.fire && io.tasks.source_b.bits.param === toN) { // Only Probe.toN can remove old client bit
-    oldClients := oldClients & ~io.tasks.source_b.bits.clients
+    oldClientsOH := oldClientsOH & ~io.tasks.source_b.bits.clients
   }
-//  when(io.resps.sink_c.fire && )
-  val mergedClients = oldClients | newClients
-  dontTouch(reqClient)
+
+  val mergedClientsOH = oldClientsOH & ~nestedReleaseClientOH | newClientsOH
+
+  dontTouch(reqClientOH)
   dontTouch(clientValid)
-  dontTouch(newClients)
-  dontTouch(oldClients)
-  dontTouch(mergedClients)
+  dontTouch(newClientsOH)
+  dontTouch(oldClientsOH)
+  dontTouch(mergedClientsOH)
 
 
   val a_task = {
@@ -212,7 +233,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
         !state.s_pprobe, // TODO: remove
         req.param,
         Mux(
-          req_get && dirResult.hit && meta.state === TRUNK || req_acquire && dirResult.hit && ! req_needT,
+          req_get && dirResult.hit && meta.state === TRUNK || req_acquire && dirResult.hit && !req_needT,
           toB,
           toN
         )
@@ -229,7 +250,11 @@ class MSHR(implicit p: Parameters) extends L2Module {
       )
     }
     ob.alias.foreach(_ := meta.alias.getOrElse(0.U))
-    ob.clients := dirResult.meta.clients
+    if(cacheParams.name == "l3") {
+      ob.clients := Mux(dirResult.hit, clientsExceptReqClientOH, dirResult.meta.clients)
+    } else {
+      ob.clients := dirResult.meta.clients
+    }
     ob
   }
 
@@ -315,13 +340,20 @@ class MSHR(implicit p: Parameters) extends L2Module {
   }
 
   val mp_grant_task    = { // mp_grant_task will serve AcquriePrem/AcquireBlock, Get, Hint
+    val reqClientNotExist = ~Cat(meta.clients & reqClientOH).orR
     mp_grant := DontCare
     mp_grant.channel := req.channel
     mp_grant.tag := req.tag
     mp_grant.set := req.set
     mp_grant.off := req.off
     mp_grant.sourceId := req.source
-    mp_grant.opcode := odOpGen(req.opcode)
+    if(cacheParams.name == "l3") {
+      // mp_grant.opcode := Mux( reqClientNotExist && req_acquire && dirResult.hit, GrantData, odOpGen(req.opcode))
+      mp_grant.opcode := Mux( reqClientNotExist && req_acquire, GrantData, odOpGen(req.opcode))
+    } else {
+      require(clientBits == 1)
+      mp_grant.opcode := odOpGen(req.opcode)
+    }
     mp_grant.param := Mux(
       req_get || req_put || req_prefetch,
       0.U, // Get/Put -> AccessAckData/AccessAck
@@ -345,7 +377,10 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_grant.aliasTask.foreach(_ := req.aliasTask.getOrElse(false.B))
     // [Alias] write probeData into DS for alias-caused Probe,
     // but not replacement-cased Probe
-    mp_grant.useProbeData := dirResult.hit && ( req_get || probeDirty ) || req.aliasTask.getOrElse(false.B)
+    mp_grant.useProbeData := dirResult.hit && ( req_get || probeDirty || nestedRelease ) || req.aliasTask.getOrElse(false.B)
+    if(cacheParams.name == "l3") {
+      mp_grant.selfHasData := dirResult.hit && !probeDirty && !nestedRelease
+    }
 
     val new_meta = MetaEntry()
     new_meta.dirty := gotDirty || dirResult.hit && (meta.dirty || probeDirty)
@@ -358,13 +393,13 @@ class MSHR(implicit p: Parameters) extends L2Module {
       new_meta.clients := Mux(
         req_prefetch,
         Mux(dirResult.hit, meta.clients, Fill(clientBits, false.B)),
-        mergedClients
+        mergedClientsOH
       )
 
       new_meta.state := Mux(
         req_get,
         TIP,
-        Mux(req_prefetch, TIP, Mux(meta_no_client || !dirResult.hit, TRUNK, TIP)),
+        Mux(req_prefetch, TIP, Mux(meta_no_client || !dirResult.hit || req_needT || req_promoteT, TRUNK, TIP)),
       )
 
       when(status_reg.valid && mp_grant_valid && dirResult.hit) {
@@ -488,32 +523,31 @@ class MSHR(implicit p: Parameters) extends L2Module {
 
   dontTouch(io.resps.sink_c.bits.source)
 
-  val probes_done = RegInit(0.U(clientBits.W))
-  val probe_clients = dirResult.meta.clients
-  val probeack_bit = WireInit(0.U(clientBits.W))
+  val probeAckDoneClient = RegInit(0.U(clientBits.W))
+  val incomingProbeAckClient = WireInit(0.U(clientBits.W))
 
-  dontTouch(probeack_bit)
-  dontTouch(probes_done)
-  dontTouch(probe_clients)
+  dontTouch(incomingProbeAckClient)
+  dontTouch(probeAckDoneClient)
+  dontTouch(probeClientsOH)
 
   if(cacheParams.name == "l3") {
     // ! This is the last client sending probeack
-    val probeack_last = (probes_done | probeack_bit) === probe_clients
-    dontTouch(probeack_last)
+    val probeackLast = ((probeAckDoneClient | incomingProbeAckClient) & ~nestedReleaseClientOH) === probeClientsOH || probeClientsOH === 0.U(clientBits.W)
+    dontTouch(probeackLast)
 
     when(io.alloc.valid) {
-      probes_done := 0.U
+      probeAckDoneClient := 0.U
     }
 
-    when(c_resp.valid) {
-      probeack_bit := getClientBitOH(io.resps.sink_c.bits.source)
+    when(c_resp.valid && io.status.bits.w_c_resp && io.status.valid) {
+      incomingProbeAckClient := getClientBitOH(io.resps.sink_c.bits.source)
       when(c_resp.bits.opcode === ProbeAck || c_resp.bits.opcode === ProbeAckData) {
-        probes_done := probes_done | probeack_bit
-        state.w_rprobeackfirst := state.w_rprobeackfirst || probeack_last
-        state.w_rprobeacklast := state.w_rprobeacklast || c_resp.bits.last && probeack_last
-        state.w_pprobeackfirst := state.w_pprobeackfirst || probeack_last
-        state.w_pprobeacklast := state.w_pprobeacklast || c_resp.bits.last && probeack_last
-        state.w_pprobeack := state.w_pprobeack || (req.off === 0.U || c_resp.bits.last) && probeack_last
+        probeAckDoneClient := probeAckDoneClient | incomingProbeAckClient
+        state.w_rprobeackfirst := state.w_rprobeackfirst || probeackLast
+        state.w_rprobeacklast := state.w_rprobeacklast || c_resp.bits.last && probeackLast
+        state.w_pprobeackfirst := state.w_pprobeackfirst || probeackLast
+        state.w_pprobeacklast := state.w_pprobeacklast || c_resp.bits.last && probeackLast
+        state.w_pprobeack := state.w_pprobeack || (req.off === 0.U || c_resp.bits.last) && probeackLast
       }
       when(c_resp.bits.opcode === ProbeAckData) {
         probeDirty := true.B
@@ -521,6 +555,8 @@ class MSHR(implicit p: Parameters) extends L2Module {
       when(isToN(c_resp.bits.param)) {
         probeGotN := true.B
       }
+    }.elsewhen(c_resp.valid) { // Other probe sub request with same addr
+      // TODO:
     }
   } else { // L2
     when(c_resp.valid) {
@@ -600,7 +636,11 @@ class MSHR(implicit p: Parameters) extends L2Module {
   io.toReqBuf.bits.willFree := will_free
   io.toReqBuf.bits.isAcqOrPrefetch := req_acquire || req_prefetch
 
-  assert(!(c_resp.valid && !io.status.bits.w_c_resp))
+  if(cacheParams.name == "l3") {
+    // assert(!(c_resp.valid && !io.status.bits.w_c_resp))
+  } else {
+    assert(!(c_resp.valid && !io.status.bits.w_c_resp))
+  }
   assert(!(d_resp.valid && !io.status.bits.w_d_resp))
   assert(!(e_resp.valid && !io.status.bits.w_e_resp))
 
@@ -619,6 +659,12 @@ class MSHR(implicit p: Parameters) extends L2Module {
     }
     when (io.nestedwb.c_set_dirty) {
       meta.dirty := true.B
+    }
+    when (io.nestedwb.c_toN) {
+      nestedRelease := true.B
+      // Update nested meta
+      meta.clients := meta.clients & ~io.nestedwb.c_client
+      nestedReleaseClientOH := nestedReleaseClientOH | io.nestedwb.c_client
     }
   }
 

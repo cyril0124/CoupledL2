@@ -127,4 +127,14 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L2Module {
   } else {
     io.r.corrupt := false.B
   }
+
+//  TODO:
+//  when(io.r.valid) {
+//    val bufferValidVec = VecInit(valids.zipWithIndex.map{
+//      case(v, i) =>
+//        Cat(v).orR & io.r.id === i.U
+//    })
+//    val hasValidBuffer = Cat(bufferValidVec).orR
+//    assert(hasValidBuffer, s"Trying to read an non-exist buffer data! rid: %d", io.r.id)
+//  }
 }

@@ -103,11 +103,16 @@ class MSHRCtl(implicit p: Parameters) extends L2Module {
   val selectedMSHROH = mshrSelector.io.out.bits
   io.toMainPipe.mshr_alloc_ptr := OHToUInt(selectedMSHROH)
 
-  val resp_sinkC_match_vec = mshrs.map(mshr =>
-    mshr.io.status.valid && mshr.io.status.bits.w_c_resp &&
-    io.resps.sinkC.set === mshr.io.status.bits.set &&
-    io.resps.sinkC.tag === mshr.io.status.bits.tag
-  )
+  val resp_sinkC_match_vec = mshrs.map { mshr =>
+    val mshr_valid = if (cacheParams.name == "l3") 
+                        mshr.io.status.valid 
+                      else 
+                        mshr.io.status.valid && mshr.io.status.bits.w_c_resp
+
+    mshr_valid &&
+      io.resps.sinkC.set === mshr.io.status.bits.set &&
+      io.resps.sinkC.tag === mshr.io.status.bits.tag
+  }
 
   mshrs.zipWithIndex.foreach {
     case (m, i) =>

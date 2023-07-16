@@ -64,6 +64,8 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {
 
   val fromProbeHelper = Bool()
 
+  val selfHasData = Bool()
+
   // For Put
   val pbIdx = UInt(mshrBits.W)
   val putHit = Bool()
@@ -235,6 +237,8 @@ class NestedWriteback(implicit p: Parameters) extends L2Bundle {
   val b_toB = Bool()
   val b_clr_dirty = Bool()
   val c_set_dirty = Bool()
+  val c_toN = Bool()
+  val c_client = UInt(clientBits.W)
 }
 
 // Put Buffer

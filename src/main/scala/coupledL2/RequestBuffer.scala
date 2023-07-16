@@ -81,7 +81,11 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   def sameSet (a: TaskBundle, b: TaskBundle):     Bool = a.set === b.set
   def sameSet (a: TaskBundle, b: MSHRBlockAInfo): Bool = a.set === b.set
   def addrConflict(a: TaskBundle, s: MSHRBlockAInfo): Bool = {
-    a.set === s.set && (a.tag === s.reqTag || a.tag === s.metaTag && s.needRelease)
+    if (cacheParams.name == "l3") {
+      a.set === s.set // && (a.tag === s.reqTag || a.tag === s.metaTag && s.needRelease) // TODO: reduce set blocking for L3 ?
+    } else {
+      a.set === s.set && (a.tag === s.reqTag || a.tag === s.metaTag && s.needRelease)
+    }
   }
   def conflictMask(a: TaskBundle): UInt = VecInit(io.mshrStatus.map(s =>
     s.valid && addrConflict(a, s.bits) && !s.bits.willFree)).asUInt
@@ -99,6 +103,18 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   }
   def occWays     (a: TaskBundle): UInt = countWaysOH(s => !s.willFree && sameSet(a, s))
   def willFreeWays(a: TaskBundle): UInt = countWaysOH(s =>  s.willFree && sameSet(a, s))
+  def willFreeWays_1(a: TaskBundle): UInt = {
+    val willFreeWays_2 = countWaysOH(s =>  s.willFree && sameSet(a, s))
+    val sameSetWays = VecInit(io.mshrStatus.map(s =>
+      Mux(
+        s.valid && sameSet(a, s.bits),
+        UIntToOH(s.bits.way, NWay),
+        0.U(NWay.W)
+      )
+    ))
+    val sameSetWaysCount = PopCount(sameSetWays.map( s => s === willFreeWays_2 ))
+    Mux(sameSetWaysCount <= 1.U, willFreeWays_2, 0.U)
+  }
 
   def noFreeWay(a: TaskBundle): Bool = !Cat(~occWays(a)).orR
   def noFreeWay(occWays: UInt): Bool = !Cat(~occWays).orR
@@ -107,11 +123,14 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   val in      = io.in.bits
   val full    = Cat(buffer.map(_.valid)).andR
   // flow not allowed when full, or entries might starve
-  val conflictWithMSHR = conflict(in)
-  val mainPipeBlock = Cat(io.mainPipeBlock).orR
-  val noFreeWayWithMSHR = noFreeWay(in)
+  // val conflictWithMSHR = conflict(in)
+  // val mainPipeBlock = Cat(io.mainPipeBlock).orR
+  // val noFreeWayWithMSHR = noFreeWay(in)
+  // val canFlow = flow.B && !full &&
+  //   !conflictWithMSHR && !chosenQValid && !mainPipeBlock && !noFreeWayWithMSHR
+
   val canFlow = flow.B && !full &&
-    !conflictWithMSHR && !chosenQValid && !mainPipeBlock && !noFreeWayWithMSHR
+    !conflict(in) && !chosenQValid && !Cat(io.mainPipeBlock).orR && !noFreeWay(in)
   val doFlow  = canFlow && io.out.ready
 
   //  val depMask    = buffer.map(e => e.valid && sameAddr(io.in.bits, e.task))
@@ -142,8 +161,8 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
 
     entry.valid   := true.B
     // when Addr-Conflict / Same-Addr-Dependent / MainPipe-Block / noFreeWay-in-Set, entry not ready
-//    entry.rdy     := !conflict(in) && !mpBlock && !noFreeWay(in) && !s1Block // && !Cat(depMask).orR
-    entry.rdy := !conflictWithMSHR && !mainPipeBlock && !noFreeWayWithMSHR && !s1Block
+    entry.rdy     := !conflict(in) && !mpBlock && !noFreeWay(in) && !s1Block // && !Cat(depMask).orR
+    // entry.rdy := !conflictWithMSHR && !mainPipeBlock && !noFreeWayWithMSHR && !s1Block
     entry.task    := io.in.bits
     entry.waitMP  := Cat(
       s1Block,
@@ -179,6 +198,23 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   //TODO: if i use occWays when update,
   // does this mean that every entry has occWays logic?
 
+  val mshr_willFreeMask = VecInit(io.mshrStatus.map(ms => ms.bits.willFree && ms.valid))
+  val buffer_sameSetWithMSHR = Wire(Vec(entries, Vec(mshrsAll, Bool())))
+  buffer_sameSetWithMSHR.zip(buffer).foreach{
+    case (flag, e) =>
+      flag := io.mshrStatus.map(status => status.valid & status.bits.set === e.task.set)
+  }
+  dontTouch(buffer_sameSetWithMSHR)
+  dontTouch(mshr_willFreeMask)
+
+  val buffer_occWayUpdate = RegInit(VecInit(Seq.fill(entries)(0.U(NWay.W))))
+  buffer_occWayUpdate.zipWithIndex.foreach{
+    case (update, i) =>
+      update := buffer_sameSetWithMSHR(i).asUInt & mshr_willFreeMask(i)
+  }
+  dontTouch(buffer_occWayUpdate)
+
+
   /* ======== Update rdy and masks ======== */
   for (e <- buffer) {
     when(e.valid) {
@@ -189,8 +225,12 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
       // when mshr will_free, clear it in other reqs' waitMS and occWays
       val willFreeMask = VecInit(io.mshrStatus.map(s => s.valid && s.bits.willFree)).asUInt
       waitMSUpdate  := e.waitMS  & (~willFreeMask).asUInt
-      occWaysUpdate := e.occWays & (~willFreeWays(e.task)).asUInt
-
+      if(cacheParams.name == "l3") {
+        occWaysUpdate := e.occWays & (~willFreeWays(e.task)).asUInt
+      } else {
+        occWaysUpdate := e.occWays & (~willFreeWays_1(e.task)).asUInt
+        // occWaysUpdate := e.occWays & (~willFreeWays(e.task)).asUInt
+      }
       // Initially,
       //    waitMP(2) = s2 blocking, wait 2 cycles
       //    waitMP(1) = s3 blocking, wait 1 cycle

@@ -79,7 +79,7 @@ class SourceB(implicit p: Parameters) extends L2Module {
 
   /* ======== Data Structure ======== */
   // TODO: check XSPerf whether 4 entries is enough
-  val entries = 4
+  val entries = if(cacheParams.name == "l3") 8 else 4
   val probes  = RegInit(VecInit(
     Seq.fill(entries)(0.U.asTypeOf(new ProbeEntry))
   ))
@@ -113,7 +113,7 @@ class SourceB(implicit p: Parameters) extends L2Module {
     p.waitG := OHToUInt(conflictMask)
     p.task  := io.task.bits
     assert(PopCount(conflictMask) <= 1.U)
-
+    assert(PopCount(io.task.bits.clients) =/= 0.U, "Non-clients probe! set:0x%x tag:0x%x", io.task.bits.set, io.task.bits.tag)
 //    val workVec = workVecs(insertIdx)
 //    workVec := io.task.bits.clients
   }
@@ -129,7 +129,11 @@ class SourceB(implicit p: Parameters) extends L2Module {
         case (sel, i) => sel -> UIntToOH(i.U, width = clientBits)
       })
       i.bits.clients := chosenClient
-      when(i.fire && PopCount(pendingClient) === 1.U) {
+
+      val issueComplete = i.fire && PopCount(pendingClient) === 1.U
+      dontTouch(issueComplete)
+      
+      when(issueComplete) {
         p.valid := false.B
       }.elsewhen(i.fire) {
         assert(PopCount(p.task.clients) =/= 1.U)
