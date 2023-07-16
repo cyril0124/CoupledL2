@@ -399,7 +399,9 @@ class MSHR(implicit p: Parameters) extends L2Module {
       new_meta.state := Mux(
         req_get,
         TIP,
-        Mux(req_prefetch, TIP, Mux(meta_no_client || !dirResult.hit || req_needT || req_promoteT, TRUNK, TIP)),
+        // Mux(req_prefetch, TIP, Mux(meta_no_client || !dirResult.hit || req_needT || req_promoteT, TRUNK, TIP)),
+        // Mux(req_prefetch, TIP, Mux(!dirResult.hit || req_needT || req_promoteT, TRUNK, TIP)),
+        Mux(req_prefetch, TIP, Mux(req_needT || req_promoteT, TRUNK, TIP)),
       )
 
       when(status_reg.valid && mp_grant_valid && dirResult.hit) {
