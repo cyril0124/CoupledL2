@@ -77,6 +77,8 @@ class MSHRCtl(implicit p: Parameters) extends L2Module {
     val nestedwb = Input(new NestedWriteback)
     val nestedwbDataId = Output(ValidIO(UInt(mshrBits.W)))
 
+    val probeHelperWakeup = Input(new ProbeHelperWakeupInfo) // Only for NINE
+
     /* read putBuffer */
 //    val pbRead = DecoupledIO(new PutBufferRead)
 //    val pbResp = Flipped(ValidIO(new PutBufferEntry))
@@ -130,6 +132,7 @@ class MSHRCtl(implicit p: Parameters) extends L2Module {
       m.io.resps.source_c.bits := io.resps.sourceC.respInfo
       
       m.io.nestedwb := io.nestedwb
+      m.io.probeHelperWakeup := io.probeHelperWakeup
 
       io.toReqBuf(i) := m.io.toReqBuf
   }

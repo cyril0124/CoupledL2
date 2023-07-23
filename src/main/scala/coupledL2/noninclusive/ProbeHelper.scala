@@ -9,17 +9,18 @@ import freechips.rocketchip.tilelink.TLPermissions._
 
 class ProbeHelper(entries: Int = 5, enqDelay: Int = 1)(implicit p: Parameters) extends L2Module {
   val io = IO(new Bundle() {
-    val dirResult = Flipped(Valid(new ClientDirResult()))
+    val clientDirResult = Flipped(Valid(new ClientDirResult()))
     val task = DecoupledIO(new TaskBundle)
     val full = Output(Bool())
+    val dirConflict = Output(Bool())
   })
 
   val queue = Module(new Queue(new TaskBundle, entries = entries, pipe = false, flow = false))
 
   io.full := queue.io.count >= (entries - enqDelay).U
 
-  val dir = io.dirResult.bits
-  val replacerInfo = io.dirResult.bits.replacerInfo
+  val dir = io.clientDirResult.bits
+  val replacerInfo = io.clientDirResult.bits.replacerInfo
   val probeTask = Wire(new TaskBundle)
 
   // addr without bankIdx
@@ -41,18 +42,20 @@ class ProbeHelper(entries: Int = 5, enqDelay: Int = 1)(implicit p: Parameters) e
   probeTask.needHint.foreach(_ := false.B)
   probeTask.alias.foreach(_ := 0.U)
   probeTask.needProbeAckData := true.B
+  probeTask.wayMask := Fill(cacheParams.ways, "b1".U)
   probeTask.dirty := false.B // ignored
 
-  val meta_hits = dir.metas.zip(dir.hits).map { case (s, hit) => !hit && s.state =/= MetaData.INVALID }
-  val dir_conflict = !dir.tagMatch() && Cat(meta_hits).orR()
+  val metaOccupied = dir.metas.zip(dir.hits).map { case (s, hit) => !hit && s.state =/= MetaData.INVALID }
+  val dirConflict = !dir.tagMatch() && Cat(metaOccupied).orR()
+
+  io.dirConflict := dirConflict // send to MainPipe
 
   val formA = replacerInfo.channel === 1.U
-  val req_acquire = formA && (replacerInfo.opcode === AcquirePerm || replacerInfo.opcode === AcquireBlock)
+  val reqAcquire = formA && (replacerInfo.opcode === AcquirePerm || replacerInfo.opcode === AcquireBlock)
 
-  queue.io.enq.valid := req_acquire && io.dirResult.valid && dir_conflict
+  queue.io.enq.valid := reqAcquire && io.clientDirResult.valid && dirConflict
   queue.io.enq.bits := probeTask
   when(queue.io.enq.valid){ assert(queue.io.enq.ready) }
 
   io.task <> queue.io.deq
-//  io.task.valid := false.B // TODO:
 }

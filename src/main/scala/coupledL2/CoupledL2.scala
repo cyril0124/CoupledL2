@@ -261,7 +261,7 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
     }
     val sizeStr = sizeBytesToStr(sizeBytes)
     val prefetch = "prefetch: " + cacheParams.prefetch
-    println(s"====== Inclusive ${cacheParams.name} ($sizeStr * $banks-bank) $prefetch ======")
+    println(s"====== ${cacheParams.inclusionPolicy} ${cacheParams.name} ($sizeStr * $banks-bank) $prefetch ======")
     println(s"bankBits: ${bankBits}")
     println(s"replacement: ${cacheParams.replacement}")
     println(s"replace policy: ${cacheParams.releaseData}")

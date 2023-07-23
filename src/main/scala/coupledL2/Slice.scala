@@ -57,27 +57,35 @@ class Slice()(implicit p: Parameters) extends L2Module with DontCareInnerLogic {
   val probeHelperOpt = if (cacheParams.inclusionPolicy == "NINE") Some(Module(new ProbeHelper(entries = 5, enqDelay = 1))) else None
   val clientDirectoryOpt = if (cacheParams.inclusionPolicy == "NINE") Some(Module(new noninclusive.ClientDirectory())) else None
 
+  reqArb.io.fromProbeHelper.blockSinkA := false.B
+
   probeHelperOpt.foreach{
     probeHelper =>
       // We will get client directory result after 2 cyels of delay
-      probeHelper.io.dirResult.valid := RegNextN(reqArb.io.dirRead_s1.valid, 2, Some(false.B)) // TODO: Optimize for clock gate
-      probeHelper.io.dirResult.bits := clientDirectoryOpt.get.io.resp
-//      probeHelper.io.full // TODO: block sinkA
+      probeHelper.io.clientDirResult.valid := RegNextN(reqArb.io.dirRead_s1.valid, 2, Some(false.B)) // TODO: Optimize for clock gate
+      probeHelper.io.clientDirResult.bits := clientDirectoryOpt.get.io.resp
 
+      reqArb.io.fromProbeHelper.blockSinkA := probeHelper.io.full
       reqArb.io.probeHelperTask.get <> probeHelper.io.task
-//      reqArb.io.probeHelperTask.get.valid := false.B
+
+      mainPipe.io.clientDirConflict.get := probeHelper.io.dirConflict
   }
 
   clientDirectoryOpt.foreach{
     clientDirectory =>
-      clientDirectory.io.read <> DontCare
-      clientDirectory.io.tagWReq <> DontCare
-      clientDirectory.io.metaWReq <> DontCare
+      // clientDirectory.io.read <> DontCare
+      // clientDirectory.io.tagWReq <> DontCare
+      // clientDirectory.io.metaWReq <> DontCare
 
       clientDirectory.io.read.valid := reqArb.io.dirRead_s1.valid
       clientDirectory.io.read.bits.set := reqArb.io.dirRead_s1.bits.set
       clientDirectory.io.read.bits.tag := reqArb.io.dirRead_s1.bits.tag
       clientDirectory.io.read.bits.replacerInfo := reqArb.io.dirRead_s1.bits.replacerInfo
+
+      mainPipe.io.clientDirResult_s3.get <> clientDirectory.io.resp
+
+      clientDirectory.io.tagWReq <> mainPipe.io.clientTagWReq.get
+      clientDirectory.io.metaWReq <> mainPipe.io.clientMetaWReq.get
   }
 
   val prbq = Module(new ProbeQueue())
@@ -109,6 +117,7 @@ class Slice()(implicit p: Parameters) extends L2Module with DontCareInnerLogic {
   mshrCtl.io.resps.sinkE := grantBuf.io.e_resp
   mshrCtl.io.resps.sourceC := sourceC.io.resp
   mshrCtl.io.nestedwb := mainPipe.io.nestedwb
+  mshrCtl.io.probeHelperWakeup := mainPipe.io.probeHelperWakeup
 //  mshrCtl.io.pbRead <> sinkA.io.pbRead
 //  mshrCtl.io.pbResp <> sinkA.io.pbResp
 //  sinkA.io.pbRead <> DontCare // TODO:

@@ -67,6 +67,9 @@ class RequestArb(implicit p: Parameters) extends L2Module {
       val blockSinkReqEntrance = new BlockInfo()
       val blockMSHRReqEntrance = Bool()
     })
+    val fromProbeHelper = Input(new Bundle{
+      val blockSinkA = Bool()
+    })
   })
   /* ======== Reset ======== */
   val resetFinish = RegInit(false.B)
@@ -120,18 +123,19 @@ class RequestArb(implicit p: Parameters) extends L2Module {
   val B_task = fromTLBtoTaskBundle(io.sinkB.bits)
   val probeHelper_task = io.probeHelperTask.getOrElse(0.U.asTypeOf(Decoupled(new TaskBundle))).bits
   val C_task = io.sinkC.bits
-  val block_A = io.fromMSHRCtl.blockA_s1 || io.fromMainPipe.blockA_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockA_s1
+  val block_A = io.fromMSHRCtl.blockA_s1 || io.fromMainPipe.blockA_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockA_s1 || io.fromProbeHelper.blockSinkA
   val block_B = io.fromMSHRCtl.blockB_s1 || io.fromMainPipe.blockB_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockB_s1
   val block_C = io.fromMSHRCtl.blockC_s1 || io.fromMainPipe.blockC_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockC_s1
 
 
   val sinkC_valid = io.sinkC.valid && !block_C
   val sinkB_valid = io.sinkB.valid && !block_B
+  val probeHelperValid = io.probeHelperTask.getOrElse(0.U.asTypeOf(Decoupled(new TaskBundle))).valid && !block_B
   val sinkA_valid = io.sinkA.valid && !block_A
   val sinkValids = if(cacheParams.inclusionPolicy == "NINE")
                       VecInit(Seq(
                         sinkC_valid,
-                        io.probeHelperTask.get.valid && !block_B,
+                        probeHelperValid,
                         sinkB_valid,
                         sinkA_valid
                       )).asUInt
@@ -144,9 +148,8 @@ class RequestArb(implicit p: Parameters) extends L2Module {
 
   val sink_ready_basic = io.dirRead_s1.ready && resetFinish && !mshr_task_s1.valid
   val sinkB_ready = sink_ready_basic && !block_B && !sinkC_valid
-  val probeHelperValid = io.probeHelperTask.getOrElse(0.U.asTypeOf(Decoupled(new TaskBundle))).valid
   val probeHelperFire = probeHelperValid & sinkB_ready
-  io.sinkA.ready := sink_ready_basic && !block_A && !sinkB_valid && !sinkC_valid // SinkC prior to SinkA & SinkB
+  io.sinkA.ready := sink_ready_basic && !block_A && !sinkB_valid && !sinkC_valid && !probeHelperValid // SinkC prior to SinkA & SinkB
   io.sinkB.ready := sinkB_ready && !probeHelperValid // SinkB prior to SinkA
   io.probeHelperTask.foreach( p => p.ready := sinkB_ready ) // TODO:
   io.sinkC.ready := sink_ready_basic && !block_C
@@ -218,7 +221,7 @@ class RequestArb(implicit p: Parameters) extends L2Module {
   // channel is used to differentiate GrantData and ProbeAckData
   io.releaseBufRead_s2.valid := mshrTask_s2 && (
     task_s2.bits.opcode === ReleaseData ||
-    task_s2.bits.fromB && task_s2.bits.opcode === ProbeAckData ||
+    task_s2.bits.fromB && task_s2.bits.opcode === ProbeAckData || 
     task_s2.bits.fromA && task_s2.bits.useProbeData && mshrTask_s2_a_upwards && !selfHasData)
   io.releaseBufRead_s2.id := task_s2.bits.mshrId
   assert(!io.refillBufRead_s2.valid || io.refillBufRead_s2.ready)

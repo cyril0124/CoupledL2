@@ -41,7 +41,7 @@ trait HasChannelBits { this: Bundle =>
 
 // We generate a Task for every TL request
 // this is the info that flows in Mainpipe
-class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {
+class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits with noninclusive.HasClientInfo {
   val set = UInt(setBits.W)
   val tag = UInt(tagBits.W)
   val off = UInt(offsetBits.W)
@@ -84,6 +84,12 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {
   val meta = new MetaEntry()
   val metaWen = Bool()
   val tagWen = Bool()
+  val clientWay = UInt(clientWayBits.W)
+  val clientSet = UInt(clientSetBits.W)
+  val clientTag = UInt(clientTagBits.W)
+  val clientMeta = Vec(clientBits, new noninclusive.ClientMetaEntry())
+  val clientMetaWen = Bool()
+  val clientTagWen = Bool()
   val dsWen = Bool()
 
   // for Dir to choose a way not occupied by some unfinished MSHR task
@@ -124,11 +130,13 @@ class MSHRStatus(implicit p: Parameters) extends L2Bundle with HasChannelBits {
   val nestB = Bool()
   val needProbeAckData = Bool() // only for B reqs
   val pbIdx = UInt(mshrBits.W)
+  val bufIdx = UInt(bufIdxBits.W) // idx of SinkC buffer, only for NINE
   val w_c_resp = Bool()
   val w_d_resp = Bool()
   val w_e_resp = Bool()
   val fromL2pft = prefetchOpt.map(_ => Bool())
   val needHint = prefetchOpt.map(_ => Bool())
+  val fromProbeHelper = Bool()
   val will_free = Bool()
   // for TopDown usage
   val reqSource = UInt(MemReqSource.reqSourceBits.W)
@@ -139,6 +147,7 @@ class MSHRStatus(implicit p: Parameters) extends L2Bundle with HasChannelBits {
 // MSHR Task that MainPipe sends to MSHRCtl
 class MSHRRequest(implicit p: Parameters) extends L2Bundle {
   val dirResult = new DirResult()
+  val clientDirResult = if(cacheParams.inclusionPolicy == "NINE") Some(new noninclusive.ClientDirResult) else None
   val state = new FSMState()
   val task = new TaskBundle()
 }
@@ -181,6 +190,7 @@ class FSMState(implicit p: Parameters) extends L2Bundle {
   val s_pprobe = Bool()   // probe upwards, casued by probe
   val s_release = Bool()  // release downwards
   val s_probeack = Bool() // respond probeack downwards
+  val s_releaseack = Bool() // respond releaseack upwards
   val s_refill = Bool()   // respond grant upwards
   // val s_grantack = Bool() // respond grantack downwards
   // val s_writeback = Bool()// writeback tag/dir
@@ -200,6 +210,8 @@ class FSMState(implicit p: Parameters) extends L2Bundle {
   val w_grantack = Bool()
 
   val w_release_sent = Bool()
+
+  val w_probehelper_done = Bool()
 }
 
 class SourceAReq(implicit p: Parameters) extends L2Bundle {
@@ -239,6 +251,12 @@ class NestedWriteback(implicit p: Parameters) extends L2Bundle {
   val c_set_dirty = Bool()
   val c_toN = Bool()
   val c_client = UInt(clientBits.W)
+}
+
+class ProbeHelperWakeupInfo(implicit p: Parameters) extends L2Bundle {
+  val valid = Bool()
+  val set = UInt(setBits.W)
+  val tag = UInt(tagBits.W)
 }
 
 // Put Buffer

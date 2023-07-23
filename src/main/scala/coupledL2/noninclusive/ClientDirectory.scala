@@ -80,7 +80,13 @@ class ClientMetaWrite(implicit p: Parameters) extends L2Bundle with HasClientInf
 class ClientTagWrite(implicit p: Parameters) extends L2Bundle with HasClientInfo {
   val set = UInt(clientSets.W)
   val way = UInt(clientWayBits.W)
-  val wtag = UInt(clientTagBits.W)
+  val tag = UInt(clientTagBits.W)
+
+  def apply(lineAddr: UInt, way: UInt) = {
+    this.set := lineAddr(clientSetBits - 1, 0)
+    this.way := way
+    this.tag := lineAddr(clientSetBits + clientTagBits - 1, clientSetBits)
+  }
 }
 
 class ClientDirectory(implicit p: Parameters) extends L2Module with DontCareInnerLogic with HasClientInfo {
@@ -91,10 +97,13 @@ class ClientDirectory(implicit p: Parameters) extends L2Module with DontCareInne
     val tagWReq = Flipped(ValidIO(new ClientTagWrite))
   })
 
+  println(s"clientInfo:")
+  println(s"\tclientWays: ${clientWays}\tclientWayBits:${clientWayBits}\tclientSets:${clientSets}\tclientSetBits:${clientSetBits}")
+
   def client_invalid_way_fn(metaVec: Vec[Vec[ClientMetaEntry]], repl: UInt): (Bool, UInt) = {
-    val invalid_vec = metaVec.map(states => Cat(states.map(_.state === INVALID)).andR())
-    val has_invalid_way = Cat(invalid_vec).orR()
-    val way = ParallelPriorityMux(invalid_vec.zipWithIndex.map(x => x._1 -> x._2.U(clientWayBits.W)))
+    val invalid_vec = Cat(metaVec.map(states => Cat(states.map(_.state === INVALID)).andR).reverse)
+    val has_invalid_way = Cat(invalid_vec).orR
+    val way = ParallelPriorityMux(invalid_vec.asBools.zipWithIndex.map(x => x._1 -> x._2.U(clientWayBits.W)))
     (has_invalid_way, way)
   }
 
@@ -118,6 +127,13 @@ class ClientDirectory(implicit p: Parameters) extends L2Module with DontCareInne
   metaArray.io.w <> DontCare
 
 
+  def restoreAddr(set: UInt, tag: UInt) = {
+    (set << offsetBits).asUInt + (tag << (setBits + offsetBits)).asUInt
+  }
+  val req = io.read.bits
+  val debugAddr = restoreAddr(req.set, req.tag)
+  dontTouch(debugAddr)
+
   // ---------------------------------------------------------------------------
   //  Stage1: latch request, access Tag/Meta
   // --------------------------------------------------------------------------
@@ -132,7 +148,7 @@ class ClientDirectory(implicit p: Parameters) extends L2Module with DontCareInne
   tagRead := tagArray.io.r(io.read.fire, rdSet).resp.data
   tagArray.io.w(
     tagWen,
-    io.tagWReq.bits.wtag,
+    io.tagWReq.bits.tag,
     io.tagWReq.bits.set,
     UIntToOH(io.tagWReq.bits.way)
   )
@@ -155,6 +171,8 @@ class ClientDirectory(implicit p: Parameters) extends L2Module with DontCareInne
   //  Stage2: get Tag/Meta, calculate hit/way
   // --------------------------------------------------------------------------
   val req_s2 = RegEnable(io.read.bits, 0.U.asTypeOf(io.read.bits), enable = io.read.fire)
+  val set_s2 = RegEnable(rdSet, 0.U(clientSetBits.W), enable = io.read.fire)
+  val tag_s2 = RegEnable(rdTag, 0.U(clientTagBits.W), enable = io.read.fire)
   val hit_s2 = Wire(Bool())
   val way_s2 = Wire(UInt(clientWayBits.W))
   val valid_s2 = RegNext(io.read.fire, false.B)
@@ -162,7 +180,7 @@ class ClientDirectory(implicit p: Parameters) extends L2Module with DontCareInne
   // Replacer
   val repl = ReplacementPolicy.fromString("random", clientWays)
 
-  val tagMatchVec = tagRead.map(_(clientTagBits - 1, 0) === req_s2.tag)
+  val tagMatchVec = tagRead.map(_(clientTagBits - 1, 0) === tag_s2)
   val metaValidVec = metaRead.map( way => Cat(way.map( _.state =/= INVALID )).orR )
   val hitVec = tagMatchVec.zip(metaValidVec).map(x => x._1 && x._2)
   val hitWay = OHToUInt(hitVec)
@@ -182,8 +200,9 @@ class ClientDirectory(implicit p: Parameters) extends L2Module with DontCareInne
   val metaAll_s3 = RegEnable(metaRead, 0.U.asTypeOf(metaRead), valid_s2)
   val tagAll_s3 = RegEnable(tagRead, 0.U.asTypeOf(tagRead), valid_s2)
   val meta_s3 = metaAll_s3(way_s3)
-  val tag_s3 = tagAll_s3(way_s3)
-  val set_s3 = RegEnable(req_s2.set, valid_s2)
+  val tag_s3 = tagAll_s3(way_s3) 
+  // val tag_s3 = RegEnable(tag_s2, valid_s2) // TODO:
+  val set_s3 = RegEnable(set_s2, valid_s2)
   val replacerInfo_s3 = RegEnable(req_s2.replacerInfo, valid_s2)
 
   io.resp.hits.zip(meta_s3).foreach{
@@ -192,13 +211,13 @@ class ClientDirectory(implicit p: Parameters) extends L2Module with DontCareInne
   }
   io.resp.way := way_s3
   io.resp.metas := meta_s3
-  io.resp.tag := tag_s3
+  io.resp.tag := tag_s3 // TODO: 
   io.resp.set := set_s3
   io.resp.error := false.B // TODO:
   io.resp.replacerInfo := replacerInfo_s3
 
-  io.read.ready := (!io.metaWReq.valid && !io.tagWReq.valid && !replacerWen) &&
-                    (tagArray.io.r.req.ready && metaArray.io.r.req.ready)
-
+  // io.read.ready := (!io.metaWReq.valid && !io.tagWReq.valid && !replacerWen) &&
+  //                   (tagArray.io.r.req.ready && metaArray.io.r.req.ready)
+  io.read.ready := (tagArray.io.r.req.ready && metaArray.io.r.req.ready)
 
 }

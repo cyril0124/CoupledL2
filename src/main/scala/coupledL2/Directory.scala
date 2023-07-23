@@ -36,6 +36,8 @@ class MetaEntry(implicit p: Parameters) extends L2Bundle {
   val prefetch = if (hasPrefetchBit) Some(Bool()) else None // whether block is prefetched
   val accessed = Bool()
 
+  val clientStates = Vec(clientBits, UInt(stateBits.W))
+
   def =/=(entry: MetaEntry): Bool = {
     this.asUInt =/= entry.asUInt
   }
@@ -47,7 +49,8 @@ object MetaEntry {
     init
   }
   def apply(dirty: Bool, state: UInt, clients: UInt, alias: Option[UInt],
-            prefetch: Bool = false.B, accessed: Bool = false.B)(implicit p: Parameters) = {
+            prefetch: Bool = false.B, accessed: Bool = false.B
+  )(implicit p: Parameters) = {
     val entry = Wire(new MetaEntry)
     entry.dirty := dirty
     entry.state := state
@@ -55,6 +58,21 @@ object MetaEntry {
     entry.alias.foreach(_ := alias.getOrElse(0.U))
     entry.prefetch.foreach(_ := prefetch)
     entry.accessed := accessed
+    entry.clientStates := DontCare
+    entry
+  }
+
+  def apply(dirty: Bool, state: UInt, clients: UInt, alias: Option[UInt], clientStates: Vec[UInt],
+            prefetch: Bool, accessed: Bool
+  )(implicit p: Parameters) = {
+    val entry = Wire(new MetaEntry)
+    entry.dirty := dirty
+    entry.state := state
+    entry.clients := clients
+    entry.alias.foreach(_ := alias.getOrElse(0.U))
+    entry.prefetch.foreach(_ := prefetch)
+    entry.accessed := accessed
+    entry.clientStates := clientStates
     entry
   }
 }
@@ -96,6 +114,10 @@ class Directory(implicit p: Parameters) extends L2Module with DontCareInnerLogic
     val metaWReq = Flipped(ValidIO(new MetaWrite))
     val tagWReq = Flipped(ValidIO(new TagWrite))
   })
+
+  if(cacheParams.name == "l3" && cacheParams.inclusionPolicy == "NINE") {
+    assert(io.metaWReq.bits.wmeta.clients === 0.U, "L3 NINE will not care meta clients so should assign 0.U for simplicity.")
+  }
 
   def invalid_way_sel(metaVec: Seq[MetaEntry], repl: UInt) = {
     val invalid_vec = metaVec.map(_.state === MetaData.INVALID)
