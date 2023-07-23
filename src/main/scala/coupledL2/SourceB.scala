@@ -65,14 +65,7 @@ class SourceB(implicit p: Parameters) extends L2Module {
     }
     b.address := Cat(task.tag, task.set, 0.U(offsetBits.W))
     b.mask    := Fill(beatBytes, 1.U(1.W))
-    if (cacheParams.inclusionPolicy == "inclusive") {
-      b.data := Cat(task.alias.getOrElse(0.U), 0.U(1.W)) // this is the same as HuanCun // TODO: for L3
-    } else if(cacheParams.inclusionPolicy == "NINE") {
-//      require(false, "TODO: NINE for L3")
-      b.data := Cat(task.alias.getOrElse(0.U), 0.U(1.W)) // this is the same as HuanCun // TODO: for L3
-    } else {
-      assert(false, s"Invalid inclusion policy ==> ${cacheParams.inclusionPolicy}")
-    }
+    b.data := Cat(task.alias.getOrElse(0.U), 0.U(1.W)) // this is the same as HuanCun // TODO: for L3
     b.corrupt := false.B
     b
   }

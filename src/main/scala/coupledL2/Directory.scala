@@ -30,12 +30,6 @@ import xs.utils.Code
 class MetaEntry(implicit p: Parameters) extends L2Bundle {
   val dirty = Bool()
   val state = UInt(stateBits.W)
-  val clients = UInt(clientBits.W)  // valid-bit of clients
-  // TODO: record specific state of clients instead of just 1-bit
-  val alias = aliasBitsOpt.map(width => UInt(width.W)) // alias bits of client
-  val prefetch = if (hasPrefetchBit) Some(Bool()) else None // whether block is prefetched
-  val accessed = Bool()
-
   val clientStates = Vec(clientBits, UInt(stateBits.W))
 
   def =/=(entry: MetaEntry): Bool = {
@@ -48,30 +42,20 @@ object MetaEntry {
     val init = WireInit(0.U.asTypeOf(new MetaEntry))
     init
   }
-  def apply(dirty: Bool, state: UInt, clients: UInt, alias: Option[UInt],
-            prefetch: Bool = false.B, accessed: Bool = false.B
+  def apply(dirty: Bool, state: UInt
   )(implicit p: Parameters) = {
     val entry = Wire(new MetaEntry)
     entry.dirty := dirty
     entry.state := state
-    entry.clients := clients
-    entry.alias.foreach(_ := alias.getOrElse(0.U))
-    entry.prefetch.foreach(_ := prefetch)
-    entry.accessed := accessed
     entry.clientStates := DontCare
     entry
   }
 
-  def apply(dirty: Bool, state: UInt, clients: UInt, alias: Option[UInt], clientStates: Vec[UInt],
-            prefetch: Bool, accessed: Bool
+  def apply(dirty: Bool, state: UInt, clientStates: Vec[UInt],
   )(implicit p: Parameters) = {
     val entry = Wire(new MetaEntry)
     entry.dirty := dirty
     entry.state := state
-    entry.clients := clients
-    entry.alias.foreach(_ := alias.getOrElse(0.U))
-    entry.prefetch.foreach(_ := prefetch)
-    entry.accessed := accessed
     entry.clientStates := clientStates
     entry
   }
@@ -115,9 +99,9 @@ class Directory(implicit p: Parameters) extends L2Module with DontCareInnerLogic
     val tagWReq = Flipped(ValidIO(new TagWrite))
   })
 
-  if(cacheParams.name == "l3" && cacheParams.inclusionPolicy == "NINE") {
-    assert(io.metaWReq.bits.wmeta.clients === 0.U, "L3 NINE will not care meta clients so should assign 0.U for simplicity.")
-  }
+//  if(cacheParams.name == "l3" && cacheParams.inclusionPolicy == "NINE") {
+//    assert(io.metaWReq.bits.wmeta.clients === 0.U, "L3 NINE will not care meta clients so should assign 0.U for simplicity.")
+//  }
 
   def invalid_way_sel(metaVec: Seq[MetaEntry], repl: UInt) = {
     val invalid_vec = metaVec.map(_.state === MetaData.INVALID)

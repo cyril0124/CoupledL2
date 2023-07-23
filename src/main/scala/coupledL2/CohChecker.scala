@@ -32,7 +32,6 @@ class CohChecker(implicit p: Parameters) extends L2Module {
       val mshrAlloc = Valid(new MSHRRequest)
       val flags = Output(new Bundle{
         val cacheAlias = Bool()
-        val metaHasClients = Bool()
         val aNeedReplacement = Bool()
         val cNeedReplacement = Bool()
         val aNeedProbe = Bool()
@@ -71,11 +70,6 @@ class CohChecker(implicit p: Parameters) extends L2Module {
   val reqClient = Wire(UInt((log2Up(clientBits) + 1).W)) // Which client does this req come from?
   val reqClientOH = getClientBitOH(task.bits.sourceId) // ! This is only for channel task
   reqClient := Mux(reqClientOH === 0.U, Cat(1.U(1.W), 0.U(log2Up(clientBits).W)), OHToUInt(reqClientOH)) // The highest bit of reqClient indicates that req comes from TL-UL node
-
-
-  // This is for inclusive
-  val metaHasClients = meta.clients.orR
-  val clientsExceptReqClientOH = meta.clients & ~reqClientOH
 
 
   // client dir result (Only for NINE)
@@ -138,289 +132,119 @@ class CohChecker(implicit p: Parameters) extends L2Module {
   val allocState = WireInit(0.U.asTypeOf(new FSMState()))
   allocState.elements.foreach(_._2 := true.B)
 
+  val replaceClientsState = ParallelMax(meta.clientStates)
+  val replaceNeedRelease = meta.state > replaceClientsState || meta.dirty && isT(meta.state)
+  aNeedReplacement := req.fromA && !dirResult.hit && meta.state =/= INVALID && replaceNeedRelease // && (req_acquireBlock_s3 && !reqNeedT || transmitFromOtherClient)
 
-  if(cacheParams.name == "l3") {
-    if(cacheParams.inclusionPolicy == "inclusive") {
-      aNeedReplacement := sinkReqA && !dirResult.hit && meta.state =/= INVALID // b and c do not need replacement
+  cacheAlias := false.B
 
-      cacheAlias := false.B
+  aNeedAcquire := Mux(
+                      reqAcquire,
+                      Mux(reqNeedT, !isT(highestStateExceptReqClient), highestStateExceptReqClient === INVALID), // AcqurieBlock / AcquirePerm
+                      Mux(reqNeedT, !isT(highestState), highestState === INVALID) // Put / Get / Prefetch
+                  )
 
-      val acquireOnMiss = reqAcquire || reqPrefetch || reqGet || reqPut // miss and need to do acquire // TODO: remove this cause always acquire on miss?
-      val acquireOnHit = meta.state === BRANCH && reqNeedT || meta.state === BRANCH && reqPut // hit and still need to do acquire
-      aNeedAcquire := req.fromA && Mux(
-                                    dirResult.hit,
-                                    acquireOnHit,
-                                    acquireOnMiss
-                                  )
+  val exceptReqClientMetaHasT = Cat(exceptReqClientMeta.map( meta => isT(meta.state) )).orR
+  aNeedProbe := sinkReqA && exceptReqClientHitOH.orR && ( reqNeedT || !dirResult.hit || exceptReqClientMetaHasT )
+  aTrigProbeHelper := sinkReqA && dirResult.hit && io.in.clientDirConflict
 
-      val isReqA = reqGet || reqPut || reqAcquire // TODO: replace with sinkReqA
-      val probeOnMiss = isReqA && meta.state =/= INVALID && metaHasClients
-      val probeOnHit = isReqA && ( !reqNeedT && meta.state === TRUNK || reqNeedT && clientsExceptReqClientOH.orR )
-      aNeedProbe := Mux(dirResult.hit, probeOnHit, probeOnMiss)
+  bNeedProbeackThrough := !dirResult.hit && dirResult.meta.state =/= INVALID && replaceNeedRelease
 
-      aNeedMSHR := aNeedAcquire || aNeedProbe || cacheAlias || reqPutPartial
-      bNeedMSHR := false.B
-      cNeedMSHR := false.B
+  cNeedReplacement := req.fromC && !dirResult.hit && dirResult.meta.state =/= INVALID && replaceNeedRelease
 
-      needMSHR := (aNeedMSHR || bNeedMSHR || cNeedMSHR) && !metaError
+  assert(reqPutPartial =/= true.B, "TODO: reqPutPartial")
+  aNeedMSHR := sinkReqA && ( aNeedAcquire || aNeedProbe || aTrigProbeHelper || aNeedReplacement || cacheAlias || reqPutPartial)
+  bNeedMSHR := req.fromProbeHelper && req.fromB && (hasClientHit || bNeedProbeackThrough)
+  cNeedMSHR := sinkReqC && cNeedReplacement // TODO: NINE
 
+  needMSHR := (aNeedMSHR || bNeedMSHR || cNeedMSHR) && !metaError
 
-      when(req.fromA) {
-        allocState.s_refill := reqPut && dirResult.hit // put request will not cause refill and grnatAck
-        allocState.w_grantack := reqPrefetch || reqGet || reqPut
-        allocState.s_put_wb := !reqPut
-        // need replacement
-        when(aNeedReplacement) {
-          allocState.w_releaseack := false.B
-          allocState.w_release_sent := false.B
-          // need rprobe for release
-          when(metaHasClients) {
-            allocState.s_release := false.B // release when rprobe is sent in MSHR
-            allocState.s_rprobe := false.B
-            allocState.w_rprobeackfirst := false.B
-            allocState.w_rprobeacklast := false.B
-          }
-        }.otherwise {
-          allocState.w_release_sent := allocState.s_acquire || allocState.s_release
-          assert(allocState.s_acquire || allocState.s_release)
-        }
-        // need Acquire downwards
-        when(aNeedAcquire) {
-          allocState.s_acquire := false.B
-          allocState.w_grantfirst := false.B
-          allocState.w_grantlast := false.B
-          allocState.w_grant := false.B
-        }
-        // need Probe for alias
-        // need Probe when Get hits on a TRUNK block
-        when(cacheAlias || aNeedProbe) {
-          allocState.s_rprobe := false.B
-          allocState.w_rprobeackfirst := false.B
-          allocState.w_rprobeacklast := false.B
-        }
-      }
+  // s_refill:                            need to schedule GrantData for the reqClient
+  // w_grantack:                          need to wait for GrantAck from reqClient
+  // s_put_wb:                            TODO: doc
+  // w_releaseack:                        need to wait for ReleaseAck from the next level device
+  // w_release_sent:                      need to wait for MainPipe issue Release request to the next level device
+  // s_acquire:                           need to schedule Acquire to the next level device
+  // w_grantfirst, w_grantlast, w_grant:  need to wait for GrantData/Grant from the next level device
+  // s_rprobe:                            need to schedule Probe to the clients due to replace release
+  // w_rprobeackfirst, w_rprobeacklast:   need to wait for ProbeAck/ProbeAckData from clients
+  // TODO: others...
+  when(req.fromA) {
+    allocState.w_probehelper_done := !io.in.clientDirConflict
 
-      when(req.fromB) {
-        // Only consider the situation when mshr needs to be allocated
-        allocState.s_pprobe := false.B
-        allocState.w_pprobeackfirst := false.B
-        allocState.w_pprobeacklast := false.B
-        allocState.w_pprobeack := false.B
-        allocState.s_probeack := false.B
-      }
+    allocState.s_refill := reqPut && dirResult.hit // put request will not cause refill and grnatAck
+    allocState.w_grantack := reqPrefetch || reqGet || reqPut
+    allocState.s_put_wb := !reqPut
+    // need replacement
+    when(aNeedReplacement) {
+      allocState.w_releaseack := false.B
+      allocState.w_release_sent := false.B
 
-
-      assert(
-            !(sinkReqC && !dirResult.hit),  // TODO: RegNext
-            "C Release should always hit, Tag:0x%x Set:0x%x Addr:0x%x Source:%d isMSHRTask:%d MSHR:%d", 
-            req.tag, req.set, debugAddr, req.sourceId, req.mshrTask, req.mshrId // TODO: RegNext
-      )
-      assert(RegNext(!(task.valid && !mshrReq && dirResult.hit && meta.state === BRANCH)), "L3 cannot have BRANCH state")
-      assert(
-            RegNext(!(task.valid && !mshrReq && dirResult.hit && meta.state === TRUNK && !meta.clients.orR)),
-            "Trunk should have some client hit, Tag:0x%x Set:0x%x Addr:0x%x Source:%d isMSHRTask:%d MSHR:%d", 
-            req.tag, req.set, debugAddr, task.bits.sourceId, task.bits.mshrTask, task.bits.mshrId // TODO: RegNext
-      )
-      assert(!req.fromProbeHelper)
-
-    } else { // NINE
-      // require(false, "TODO: NINE")
-      val replaceClientsState = ParallelMax(meta.clientStates)
-      val replaceNeedRelease = meta.state > replaceClientsState || meta.dirty && isT(meta.state) 
-      aNeedReplacement := req.fromA && !dirResult.hit && meta.state =/= INVALID && replaceNeedRelease // && (req_acquireBlock_s3 && !reqNeedT || transmitFromOtherClient) 
-
-      cacheAlias := false.B
-
-      aNeedAcquire := Mux(
-                          reqAcquire, 
-                          Mux(reqNeedT, !isT(highestStateExceptReqClient), highestStateExceptReqClient === INVALID), // AcqurieBlock / AcquirePerm
-                          Mux(reqNeedT, !isT(highestState), highestState === INVALID) // Put / Get / Prefetch
-                      )
-
-      val exceptReqClientMetaHasT = Cat(exceptReqClientMeta.map( meta => isT(meta.state) )).orR
-      aNeedProbe := sinkReqA && exceptReqClientHitOH.orR && ( reqNeedT || !dirResult.hit || exceptReqClientMetaHasT )
-      aTrigProbeHelper := sinkReqA && dirResult.hit && io.in.clientDirConflict
-
-      bNeedProbeackThrough := !dirResult.hit && dirResult.meta.state =/= INVALID && replaceNeedRelease
-
-      cNeedReplacement := req.fromC && !dirResult.hit && dirResult.meta.state =/= INVALID && replaceNeedRelease
-
-      assert(reqPutPartial =/= true.B, "TODO: reqPutPartial")
-      aNeedMSHR := sinkReqA && ( aNeedAcquire || aNeedProbe || aTrigProbeHelper || aNeedReplacement || cacheAlias || reqPutPartial)
-      bNeedMSHR := req.fromProbeHelper && req.fromB && (hasClientHit || bNeedProbeackThrough)
-      cNeedMSHR := sinkReqC && cNeedReplacement // TODO: NINE
-
-      needMSHR := (aNeedMSHR || bNeedMSHR || cNeedMSHR) && !metaError
-
-      // s_refill:                            need to schedule GrantData for the reqClient
-      // w_grantack:                          need to wait for GrantAck from reqClient
-      // s_put_wb:                            TODO: doc
-      // w_releaseack:                        need to wait for ReleaseAck from the next level device
-      // w_release_sent:                      need to wait for MainPipe issue Release request to the next level device 
-      // s_acquire:                           need to schedule Acquire to the next level device
-      // w_grantfirst, w_grantlast, w_grant:  need to wait for GrantData/Grant from the next level device
-      // s_rprobe:                            need to schedule Probe to the clients due to replace release
-      // w_rprobeackfirst, w_rprobeacklast:   need to wait for ProbeAck/ProbeAckData from clients
-      // TODO: others...
-      when(req.fromA) {
-        allocState.w_probehelper_done := !io.in.clientDirConflict
-
-        allocState.s_refill := reqPut && dirResult.hit // put request will not cause refill and grnatAck
-        allocState.w_grantack := reqPrefetch || reqGet || reqPut
-        allocState.s_put_wb := !reqPut
-        // need replacement
-        when(aNeedReplacement) {
-          allocState.w_releaseack := false.B
-          allocState.w_release_sent := false.B
-
-          // need rprobe for release
-          // Foe NINE, do nothing here.
-        }.otherwise {
-          allocState.w_release_sent := allocState.s_acquire || allocState.s_release
-          assert(allocState.s_acquire || allocState.s_release)
-        }
-        // need Acquire downwards
-        when(aNeedAcquire) {
-          allocState.s_acquire := false.B
-          allocState.w_grantfirst := false.B
-          allocState.w_grantlast := false.B
-          allocState.w_grant := false.B
-        }
-        // need Probe for alias
-        // need Probe when Get hits on a TRUNK block
-        when(cacheAlias || aNeedProbe) {
-          assert(cacheAlias === false.B, "L3 does not have cacheAlias case")
-          
-          allocState.s_rprobe := false.B
-          allocState.w_rprobeackfirst := false.B
-          allocState.w_rprobeacklast := false.B
-        }
-      }
-
-      when(req.fromB) {
-        when(!mshrReq) {
-          assert(req.fromProbeHelper, "L3 NINE can only accept b request from ProbeHelper")
-        }
-
-        // Only consider the situation when mshr needs to be allocated
-        allocState.s_pprobe := false.B
-        allocState.w_pprobeackfirst := false.B
-        allocState.w_pprobeacklast := false.B
-        allocState.w_pprobeack := false.B
-        allocState.s_probeack := false.B // Notice: req.fromProbeHelper does not need probeack for the next level device but need to update clientDir
-        
-        when(bNeedProbeackThrough) { // turn probeack into release
-          allocState.s_release := false.B
-          allocState.w_releaseack := false.B
-        }
-      }
-
-      when(req.fromC) {
-        when(cNeedReplacement) {
-          // allocState.s_release := false.B
-          // allocState.w_releaseack := false.B
-          allocState.s_releaseack := false.B // Send releaseack and write meta & data
-          allocState.w_release_sent := false.B // Waitting for mainpipe send release 
-          allocState.w_releaseack := false.B // Waitting for receiving ReleaseAck send by mainpipe
-        }
-      }
-
-
-      assert(
-        RegNext(!(sinkReqC && !clientDirResult.hits.asUInt.orR)), 
-        "C Release should have some clients hit, Tag:0x%x Set:0x%x Addr:0x%x Source:%d isMSHRTask:%d MSHR:%d",
-        RegNext(req.tag), RegNext(req.set), RegNext(debugAddr), RegNext(req.sourceId), RegNext(req.mshrTask), RegNext(req.mshrId)
-      )
-
-      assert(
-        RegNext(!(task.valid && !mshrReq && dirResult.hit && meta.state === TRUNK && !clientDirResult.hits.asUInt.orR)),
-        "Trunk should have some client hit, Tag:0x%x Set:0x%x Addr:0x%x Source:%d isMSHRTask:%d MSHR:%d", 
-        RegNext(req.tag), RegNext(req.set), RegNext(debugAddr), RegNext(req.sourceId), RegNext(req.mshrTask), RegNext(req.mshrId)
-      )
+      // need rprobe for release
+      // Foe NINE, do nothing here.
+    }.otherwise {
+      allocState.w_release_sent := allocState.s_acquire || allocState.s_release
+      assert(allocState.s_acquire || allocState.s_release)
     }
-  } else { // L2
-    require(clientBits == 1)
-    require(cacheParams.inclusionPolicy == "inclusive")
-    aNeedReplacement := sinkReqA && !dirResult.hit && meta.state =/= INVALID
-
-    cacheAlias := reqAcquire && dirResult.hit && meta.clients(0) && meta.alias.getOrElse(0.U) =/= req.alias.getOrElse(0.U) 
-
-    val acquireOnMiss = reqAcquire || reqPrefetch || reqGet || reqPut // miss and need to do acquire // TODO: remove this cause always acquire on miss?
-    val acquireOnHit = meta.state === BRANCH && reqNeedT || meta.state === BRANCH && reqPut // hit and still need to do acquire
-    // For channel A reqs, alloc mshr when: acquire downwards is needed || alias
-    aNeedAcquire := req.fromA && Mux(
-                                  dirResult.hit,
-                                  acquireOnHit,
-                                  acquireOnMiss
-                                )
-
-    aNeedProbe := (reqGet || reqPut) && dirResult.hit && meta.state === TRUNK
-
-    aNeedMSHR := aNeedAcquire || aNeedProbe || cacheAlias || reqPutPartial
-    bNeedMSHR := dirResult.hit && req.fromB && !(meta.state === BRANCH && req.param === toB) && metaHasClients
-    cNeedMSHR := false.B
-
-    needMSHR := (aNeedMSHR || bNeedMSHR || cNeedMSHR) && !metaError
-
-
-    // Initial state assignment
-    // ! Caution: s_ and w_ are false-as-valid
-    when(req.fromA) {
-      // TODO: L2: remove put logic
-      allocState.s_refill := reqPut && dirResult.hit // put request will not cause refill and grnatAck
-      allocState.w_grantack := reqPrefetch || reqGet || reqPut
-      allocState.s_put_wb := !reqPut
-      // need replacement
-      when(aNeedReplacement) {
-        allocState.w_releaseack := false.B
-        allocState.w_release_sent := false.B
-        // need rprobe for release
-        when(metaHasClients) {
-          allocState.s_release := false.B // release when rprobe is sent in MSHR
-          allocState.s_rprobe := false.B
-          allocState.w_rprobeackfirst := false.B
-          allocState.w_rprobeacklast := false.B
-        }
-      }.otherwise {
-        allocState.w_release_sent := allocState.s_acquire || allocState.s_release
-        assert(allocState.s_acquire || allocState.s_release)
-      }
-      // need Acquire downwards
-      when(aNeedAcquire) {
-        allocState.s_acquire := false.B
-        allocState.w_grantfirst := false.B
-        allocState.w_grantlast := false.B
-        allocState.w_grant := false.B
-      }
-      // need Probe for alias
-      // need Probe when Get hits on a TRUNK block
-      when(cacheAlias || aNeedProbe) {
-        allocState.s_rprobe := false.B
-        allocState.w_rprobeackfirst := false.B
-        allocState.w_rprobeacklast := false.B
-      }
+    // need Acquire downwards
+    when(aNeedAcquire) {
+      allocState.s_acquire := false.B
+      allocState.w_grantfirst := false.B
+      allocState.w_grantlast := false.B
+      allocState.w_grant := false.B
     }
-    when(req.fromB) {
-      // Only consider the situation when mshr needs to be allocated
-      allocState.s_pprobe := false.B
-      allocState.w_pprobeackfirst := false.B
-      allocState.w_pprobeacklast := false.B
-      allocState.w_pprobeack := false.B
-      allocState.s_probeack := false.B
+    // need Probe for alias
+    // need Probe when Get hits on a TRUNK block
+    when(cacheAlias || aNeedProbe) {
+      assert(cacheAlias === false.B, "L3 does not have cacheAlias case")
+
+      allocState.s_rprobe := false.B
+      allocState.w_rprobeackfirst := false.B
+      allocState.w_rprobeacklast := false.B
     }
-
-
-    assert(
-          !(sinkReqC && !dirResult.hit), 
-          "C Release should always hit, Tag:0x%x Set:0x%x Addr:0x%x Source:%d isMSHRTask:%d MSHR:%d", 
-          req.tag, req.set, debugAddr, req.sourceId, req.mshrTask, req.mshrId
-    )
-    assert(
-          RegNext(!(task.valid && !mshrReq && dirResult.hit && meta.state === TRUNK && !meta.clients.orR)),
-          "Trunk should have some client hit, Tag:0x%x Set:0x%x Addr:0x%x Source:%d isMSHRTask:%d MSHR:%d", 
-          req.tag, req.set, debugAddr, task.bits.sourceId, task.bits.mshrTask, task.bits.mshrId
-    )
   }
+
+  when(req.fromB) {
+    when(!mshrReq) {
+      assert(req.fromProbeHelper, "L3 NINE can only accept b request from ProbeHelper")
+    }
+
+    // Only consider the situation when mshr needs to be allocated
+    allocState.s_pprobe := false.B
+    allocState.w_pprobeackfirst := false.B
+    allocState.w_pprobeacklast := false.B
+    allocState.w_pprobeack := false.B
+    allocState.s_probeack := false.B // Notice: req.fromProbeHelper does not need probeack for the next level device but need to update clientDir
+
+    when(bNeedProbeackThrough) { // turn probeack into release
+      allocState.s_release := false.B
+      allocState.w_releaseack := false.B
+    }
+  }
+
+  when(req.fromC) {
+    when(cNeedReplacement) {
+      // allocState.s_release := false.B
+      // allocState.w_releaseack := false.B
+      allocState.s_releaseack := false.B // Send releaseack and write meta & data
+      allocState.w_release_sent := false.B // Waitting for mainpipe send release
+      allocState.w_releaseack := false.B // Waitting for receiving ReleaseAck send by mainpipe
+    }
+  }
+
+
+  assert(
+    RegNext(!(sinkReqC && !clientDirResult.hits.asUInt.orR)),
+    "C Release should have some clients hit, Tag:0x%x Set:0x%x Addr:0x%x Source:%d isMSHRTask:%d MSHR:%d",
+    RegNext(req.tag), RegNext(req.set), RegNext(debugAddr), RegNext(req.sourceId), RegNext(req.mshrTask), RegNext(req.mshrId)
+  )
+
+  assert(
+    RegNext(!(task.valid && !mshrReq && dirResult.hit && meta.state === TRUNK && !clientDirResult.hits.asUInt.orR)),
+    "Trunk should have some client hit, Tag:0x%x Set:0x%x Addr:0x%x Source:%d isMSHRTask:%d MSHR:%d",
+    RegNext(req.tag), RegNext(req.set), RegNext(debugAddr), RegNext(req.sourceId), RegNext(req.mshrTask), RegNext(req.mshrId)
+  )
+
 
   val mshrTask = Wire(new TaskBundle)
   mshrTask := DontCare
@@ -451,7 +275,6 @@ class CohChecker(implicit p: Parameters) extends L2Module {
   io.out.mshrAlloc.bits.state := allocState
 
   io.out.flags.cacheAlias := cacheAlias
-  io.out.flags.metaHasClients := metaHasClients
   io.out.flags.aNeedReplacement := aNeedReplacement
   io.out.flags.cNeedReplacement := cNeedReplacement
   io.out.flags.aNeedProbe := aNeedProbe
