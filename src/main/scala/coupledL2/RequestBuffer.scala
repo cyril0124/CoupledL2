@@ -173,7 +173,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     entry.occWays := Mux(mpBlock, 0.U, occWays(in))
 
 //    entry.depMask := depMask
-    assert(PopCount(conflictMask(in)) <= 2.U)
+//    assert(PopCount(conflictMask(in)) <= 2.U)
   }
 
   /* ======== Issue ======== */

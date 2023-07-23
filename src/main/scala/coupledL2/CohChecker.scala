@@ -154,7 +154,7 @@ class CohChecker(implicit p: Parameters) extends L2Module {
 
   assert(reqPutPartial =/= true.B, "TODO: reqPutPartial")
   aNeedMSHR := sinkReqA && ( aNeedAcquire || aNeedProbe || aTrigProbeHelper || aNeedReplacement || cacheAlias || reqPutPartial)
-  bNeedMSHR := req.fromProbeHelper && req.fromB && (hasClientHit || bNeedProbeackThrough)
+  bNeedMSHR := req.fromProbeHelper && req.fromB && hasClientHit
   cNeedMSHR := sinkReqC && cNeedReplacement // TODO: NINE
 
   needMSHR := (aNeedMSHR || bNeedMSHR || cNeedMSHR) && !metaError
@@ -219,6 +219,8 @@ class CohChecker(implicit p: Parameters) extends L2Module {
     when(bNeedProbeackThrough) { // turn probeack into release
       allocState.s_release := false.B
       allocState.w_releaseack := false.B
+
+      allocState.s_probeack := true.B // In this case release will help write client dir
     }
   }
 

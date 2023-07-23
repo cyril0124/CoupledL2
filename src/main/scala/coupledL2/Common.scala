@@ -242,15 +242,21 @@ class BlockInfo(implicit p: Parameters) extends L2Bundle {
   val blockC_s1 = Bool()
 }
 
-class NestedWriteback(implicit p: Parameters) extends L2Bundle {
+class NestedWriteback(implicit p: Parameters) extends L2Bundle with HasChannelBits {
+  val valid = Bool()
   val set = UInt(setBits.W)
   val tag = UInt(tagBits.W)
+  val sourceId = UInt(sourceIdBits.W)
   val b_toN = Bool()
   val b_toB = Bool()
   val b_clr_dirty = Bool()
   val c_set_dirty = Bool()
   val c_toN = Bool()
+  val c_toB = Bool()
   val c_client = UInt(clientBits.W)
+
+  val wakeupValid = Bool()
+  val wakeupSourceId = UInt(sourceIdBits.W)
 }
 
 class ProbeHelperWakeupInfo(implicit p: Parameters) extends L2Bundle {

@@ -153,7 +153,7 @@ class Slice()(implicit p: Parameters) extends L2Module with DontCareInnerLogic {
   sinkA.io.fromPutDataBuf.full := putDataBuf.io.full
 
   releaseBuf.io.w(0) <> sinkC.io.releaseBufWrite
-  releaseBuf.io.w(0).id := mshrCtl.io.releaseBufWriteId
+  releaseBuf.io.w(0).id := mshrCtl.io.releaseBufWriteId // id is given by MSHRCtl by comparing address to the MSHRs (only for ProbeAckData)
   releaseBuf.io.w(1) <> mainPipe.io.releaseBufWrite
   releaseBuf.io.w(2).valid := mshrCtl.io.nestedwbDataId.valid
   releaseBuf.io.w(2).beat_sel := Fill(beatSize, 1.U(1.W))

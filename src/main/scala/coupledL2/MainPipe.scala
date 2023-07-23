@@ -639,18 +639,28 @@ class MainPipe(implicit p: Parameters) extends L2Module with noninclusive.HasCli
   d_s3.bits.data.data := data_s3
 
   /* ======== nested & prefetch ======== */
+  io.nestedwb.valid := !req_s3.mshrTask && task_s3.valid
+  io.nestedwb.channel := req_s3.channel
   io.nestedwb.set := req_s3.set
   io.nestedwb.tag := req_s3.tag
-  io.nestedwb.b_toN := task_s3.valid && metaW_valid_s3_b && req_s3.param === toN
-  // io.nestedwb.b_toB := task_s3.valid && metaW_valid_s3_b && req_s3.param =/= toB // assume L3 won't send Probe toT
-  io.nestedwb.b_toB := task_s3.valid && metaW_valid_s3_b && req_s3.param === toB
-  io.nestedwb.b_clr_dirty := task_s3.valid && metaW_valid_s3_b && meta_s3.dirty
+  io.nestedwb.sourceId := req_s3.sourceId
+
+  io.nestedwb.b_toN := task_s3.valid && sinkB_req_s3 && req_s3.param === toN
+  io.nestedwb.b_toB := task_s3.valid && sinkB_req_s3 && req_s3.param === toB
+  io.nestedwb.b_clr_dirty := task_s3.valid && sinkB_req_s3 && meta_s3.dirty
+
   // c_set_dirty is true iff Release has Data
-  io.nestedwb.c_set_dirty := task_s3.valid && metaW_valid_s3_c && wen_c
-  io.nestedwb.c_toN := task_s3.valid && metaW_valid_s3_c && isToN(task_s3.bits.param)
-  io.nestedwb.c_client := reqClientOH & metaW_valid_s3_c
+  io.nestedwb.c_set_dirty := task_s3.valid && sinkC_req_s3 && task_s3.bits.opcode === ReleaseData
+  io.nestedwb.c_toN := task_s3.valid && sinkC_req_s3 && isToN(task_s3.bits.param)
+  io.nestedwb.c_toB := task_s3.valid && sinkC_req_s3 && isToB(task_s3.bits.param)
+  io.nestedwb.c_client := reqClientOH & sinkC_req_s3
+
+  io.nestedwb.wakeupValid := !req_s3.mshrTask && task_s3.valid
+  io.nestedwb.wakeupSourceId := req_s3.sourceId
 
   io.nestedwbData := bufResp_s3.asTypeOf(new DSBlock)
+
+
 
   io.prefetchTrain.foreach {
     train =>
