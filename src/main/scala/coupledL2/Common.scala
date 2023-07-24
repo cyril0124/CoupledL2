@@ -247,6 +247,7 @@ class NestedWriteback(implicit p: Parameters) extends L2Bundle with HasChannelBi
   val set = UInt(setBits.W)
   val tag = UInt(tagBits.W)
   val sourceId = UInt(sourceIdBits.W)
+  val needMSHR = Bool()
   val b_toN = Bool()
   val b_toB = Bool()
   val b_clr_dirty = Bool()

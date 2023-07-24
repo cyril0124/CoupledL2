@@ -644,6 +644,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with noninclusive.HasCli
   io.nestedwb.set := req_s3.set
   io.nestedwb.tag := req_s3.tag
   io.nestedwb.sourceId := req_s3.sourceId
+  io.nestedwb.needMSHR := need_mshr_s3
 
   io.nestedwb.b_toN := task_s3.valid && sinkB_req_s3 && req_s3.param === toN
   io.nestedwb.b_toB := task_s3.valid && sinkB_req_s3 && req_s3.param === toB
@@ -671,7 +672,6 @@ class MainPipe(implicit p: Parameters) extends L2Module with noninclusive.HasCli
 //      train.bits.needT := req_needT_s3
 //      train.bits.source := req_s3.sourceId
       train <> DontCare
-
   }
 
 

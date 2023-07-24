@@ -42,7 +42,6 @@ class CohChecker(implicit p: Parameters) extends L2Module {
       })
     }
   })
-  // io.out.mshrAlloc <> DontCare
 
   // Signal alias
   val task      = io.in.task

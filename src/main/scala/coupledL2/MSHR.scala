@@ -90,7 +90,10 @@ class MSHR(implicit p: Parameters) extends L2Module {
 
   val timer = RegInit(0.U(64.W)) // for performance analysis
 
-  /* MSHR Allocation */
+
+  // --------------------------------------------------------------------------
+  //  MSHR Allocation
+  // --------------------------------------------------------------------------
   val status_reg = RegInit(0.U.asTypeOf(Valid(new MSHRStatus())))
   val req        = status_reg.bits
   val reqClient = Reg(UInt((log2Up(clientBits) + 1).W)) // Which client does this req come from?
@@ -157,7 +160,10 @@ class MSHR(implicit p: Parameters) extends L2Module {
     timer       := 1.U
   }
 
-  /* ======== Enchantment ======== */
+
+  // --------------------------------------------------------------------------
+  //  Enchantment
+  // --------------------------------------------------------------------------
   val meta_no_client = !clientDirResult.hits.asUInt.orR
 
   val req_needT = needT(req.opcode, req.param) // Put / Acquire.NtoT / Acquire.BtoT / Hint.prefetch_write
@@ -169,7 +175,10 @@ class MSHR(implicit p: Parameters) extends L2Module {
   val req_prefetch = req.opcode === Hint
   val req_promoteT = (req_acquire || req_get || req_prefetch) && Mux(dirResult.hit, meta_no_client && meta.state === TIP, gotT)
 
-  /* ======== Task allocation ======== */
+
+  // --------------------------------------------------------------------------
+  //  Task allocation
+  // --------------------------------------------------------------------------
   // Theoretically, data to be released is saved in ReleaseBuffer, so Acquire can be sent as soon as req enters mshr
   io.tasks.source_a.valid := !state.s_acquire && state.s_release && state.w_release_sent
   assert(!((!state.s_pprobe || !state.s_rprobe) && !io.tasks.source_b.bits.clients.orR && !req.fromProbeHelper), "Need schedule probe but without clients Set:0x%x Tag:0x%x mshr:%d fromProbeHelper:%d rprobe:%d pprobe:%d ob.param:%d", req.set, req.tag, io.id, req.fromProbeHelper, state.s_rprobe, state.s_pprobe, io.tasks.source_b.bits.param)
@@ -189,9 +198,13 @@ class MSHR(implicit p: Parameters) extends L2Module {
   }
 
   
-  /* ======== Deal with clients ======== */
+  // Deal with clients
   val clientValid = !(req_get && (!dirResult.hit || meta_no_client || probeGotN))
 
+
+  // --------------------------------------------------------------------------
+  //  MSHR send A task
+  // --------------------------------------------------------------------------
   val a_task = {
     val oa = io.tasks.source_a.bits
     oa := DontCare
@@ -214,6 +227,10 @@ class MSHR(implicit p: Parameters) extends L2Module {
     oa
   }
 
+
+  // --------------------------------------------------------------------------
+  //  MSHR send B task
+  // --------------------------------------------------------------------------
   val b_task = {
     val ob = io.tasks.source_b.bits
     ob := DontCare
@@ -247,7 +264,11 @@ class MSHR(implicit p: Parameters) extends L2Module {
     ob
   }
 
+
   val mp_release, mp_releaseack, mp_probeack, mp_grant, mp_put_wb = Wire(new TaskBundle)
+  // --------------------------------------------------------------------------
+  //  MSHR send Release(C) task
+  // --------------------------------------------------------------------------
   val mp_release_task = {
     mp_release := DontCare
     mp_release.channel := req.channel
@@ -301,6 +322,10 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_release
   }
 
+
+  // --------------------------------------------------------------------------
+  //  MSHR send ProbeAck/ProbeAckData
+  // --------------------------------------------------------------------------
   val mp_probeack_task = { // accept probe and need resp(probeack)
     mp_probeack := DontCare
     mp_probeack.channel := req.channel
@@ -355,6 +380,10 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_probeack
   }
 
+
+  // --------------------------------------------------------------------------
+  //  MSHR send ReleaseAck
+  // --------------------------------------------------------------------------
   val mp_releaseack_task = {
     mp_releaseack := DontCare
     mp_releaseack.channel := req.channel
@@ -431,6 +460,10 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_releaseack
   }
 
+
+  // --------------------------------------------------------------------------
+  //  MSHR send Grant/GrantData
+  // --------------------------------------------------------------------------
   val mp_grant_task    = { // mp_grant_task will serve AcquriePrem/AcquireBlock, Get, Hint
     mp_grant := DontCare
     mp_grant.channel := req.channel
@@ -560,6 +593,10 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_grant
   }
 
+
+  // --------------------------------------------------------------------------
+  //  MSHR write back Put request
+  // --------------------------------------------------------------------------
   val mp_put_wb_task = {
     mp_put_wb := DontCare
     mp_put_wb.mshrTask := true.B
@@ -592,6 +629,10 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_put_wb
   }
 
+
+  // --------------------------------------------------------------------------
+  //  MainPipe task issue
+  // --------------------------------------------------------------------------
   io.tasks.mainpipe.bits := ParallelPriorityMux(
     Seq(
       mp_grant_valid    -> mp_grant,
@@ -610,7 +651,10 @@ class MSHR(implicit p: Parameters) extends L2Module {
     }
   }
 
-  /* ======== Task update ======== */
+
+  // --------------------------------------------------------------------------
+  //  Task update
+  // --------------------------------------------------------------------------
   when (io.tasks.source_a.fire) {
     state.s_acquire := true.B
   }
@@ -633,19 +677,13 @@ class MSHR(implicit p: Parameters) extends L2Module {
       state.s_put_wb := true.B
     }
   }
-  // prefetchOpt.foreach {
-  //   _ =>
-  //     when (io.tasks.prefetchTrain.get.fire()) {
-  //       state.s_triggerprefetch.get := true.B
-  //     }
-  // }
+
 
   /* ======== Refill response ======== */
   val c_resp = io.resps.sink_c
   val d_resp = io.resps.sink_d
   val e_resp = io.resps.sink_e
 
-  dontTouch(io.resps.sink_c.bits.source)
 
   val probeAckDoneClient = RegInit(0.U(clientBits.W))
   val incomingProbeAckClient = WireInit(0.U(clientBits.W))
@@ -655,19 +693,22 @@ class MSHR(implicit p: Parameters) extends L2Module {
                         )
   assert(!((!state.s_pprobe || !state.s_rprobe) && !hasClientHit), "rprobe:%d pprobe:%d", state.s_rprobe, state.s_pprobe)
 
-  dontTouch(incomingProbeAckClient)
-  dontTouch(probeAckDoneClient)
-  dontTouch(probeClientsOH)
-
-
   // ! This is the last client sending probeack
   val probeackLast = (probeAckDoneClient | incomingProbeAckClient) === probeClientsOH || probeClientsOH === 0.U(clientBits.W)
-  dontTouch(probeackLast)
 
   when(io.alloc.valid) {
     probeAckDoneClient := 0.U
   }
 
+  dontTouch(probeackLast)
+  dontTouch(incomingProbeAckClient)
+  dontTouch(probeAckDoneClient)
+  dontTouch(probeClientsOH)
+
+
+  // --------------------------------------------------------------------------
+  //  Accept D channel resp
+  // --------------------------------------------------------------------------
   when(c_resp.valid && io.status.bits.w_c_resp && io.status.valid) {
     incomingProbeAckClient := getClientBitOH(io.resps.sink_c.bits.source)
     when(c_resp.bits.opcode === ProbeAck || c_resp.bits.opcode === ProbeAckData) {
@@ -698,6 +739,10 @@ class MSHR(implicit p: Parameters) extends L2Module {
     // TODO:
   }
 
+
+  // --------------------------------------------------------------------------
+  //  Accept D channel resp
+  // --------------------------------------------------------------------------
   when (d_resp.valid) {
     when(d_resp.bits.opcode === Grant || d_resp.bits.opcode === GrantData || d_resp.bits.opcode === AccessAck) {
       state.w_grantfirst := true.B
@@ -716,14 +761,26 @@ class MSHR(implicit p: Parameters) extends L2Module {
     }
   }
 
+
+  // --------------------------------------------------------------------------
+  //  Accept E channel resp
+  // --------------------------------------------------------------------------
   when (e_resp.valid) {
     state.w_grantack := true.B
   }
 
+
+  // --------------------------------------------------------------------------
+  //  Source C channel monitor
+  // --------------------------------------------------------------------------
   when (io.resps.source_c.valid) {
     state.w_release_sent := true.B
   }
 
+
+  // --------------------------------------------------------------------------
+  //  MSHR unlock logic
+  // --------------------------------------------------------------------------
   when (status_reg.valid) {
     timer := timer + 1.U
   }
@@ -736,6 +793,10 @@ class MSHR(implicit p: Parameters) extends L2Module {
     timer := 0.U
   }
 
+
+  // --------------------------------------------------------------------------
+  //  Status report
+  // --------------------------------------------------------------------------
   io.status.valid := status_reg.valid
   io.status.bits <> status_reg.bits
   // For A reqs, we only concern about the tag to be replaced
@@ -750,6 +811,10 @@ class MSHR(implicit p: Parameters) extends L2Module {
   io.status.bits.is_miss := !dirResult.hit
   io.status.bits.is_prefetch := req_prefetch
 
+
+  // --------------------------------------------------------------------------
+  //  Info for the request buffer
+  // --------------------------------------------------------------------------
   io.toReqBuf.valid := status_reg.valid
   io.toReqBuf.bits.set := req.set
   io.toReqBuf.bits.way := req.way
@@ -833,7 +898,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     //    C nest A || C nest B
     // noninclusive L3 only meet with C nest A
     when(io.nestedwb.fromC) {
-      waitNestedC := true.B
+      waitNestedC := io.nestedwb.needMSHR // If a nested request does not need MSHR, then we just update nested info.
       nestedSourceIdC := io.nestedwb.sourceId
 
       // TODO: Hit or Miss ??
