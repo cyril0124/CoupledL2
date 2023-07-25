@@ -296,24 +296,6 @@ class MainPipe(implicit p: Parameters) extends L2Module with noninclusive.HasCli
     }
   }.otherwise {
     when(req_s3.fromA) {
-      if(cacheParams.inclusionPolicy == "NINE") {
-        when(sinkC_req_s3 && !need_mshr_s3_c) {
-          sink_resp_s3.bits.opcode := {
-            cacheParams.releaseData match {
-              case 0 => Mux(meta_s3.dirty, ReleaseData, Release)
-//              case 1 => Mux(meta_s3.dirty && meta_s3.accessed, ReleaseData, Release)
-              case 2 => ReleaseData
-              case 3 => ReleaseData
-            }
-          }
-          sink_resp_s3.bits.param := Mux(isT(meta_s3.state), TtoN, BtoN)
-          // sink_resp_s3.bits.mshrId is changed to mshr_alloc_ptr at stage 4
-          // so source of C-Release is correct
-          sink_resp_s3.bits.tag := dirResult_s3.tag
-          sink_resp_s3.bits.dirty := meta_s3.dirty // TODO:
-        }
-      }
-      
       when(mainpipe_release) { // replacement-Release for A-miss
         sink_resp_s3.bits.opcode := {
           cacheParams.releaseData match {
@@ -562,9 +544,16 @@ class MainPipe(implicit p: Parameters) extends L2Module with noninclusive.HasCli
     MetaEntry()
   )
 
-  io.tagWReq.valid     := task_s3.valid && (mshr_grant_s3 || mshr_accessack_s3 || mshr_accessackdata_s3 || mshr_hintack_s3) && req_s3.tagWen
+  io.tagWReq.valid     := task_s3.valid && (
+                            (mshr_grant_s3 || mshr_accessack_s3 || mshr_accessackdata_s3 || mshr_hintack_s3 || mshr_releaseack_s3) && req_s3.tagWen ||
+                            metaW_valid_s3_c
+                          )
+//  io.tagWReq.valid := task_s3.valid && (
+//    (mshr_grant_s3 || mshr_accessack_s3 || mshr_accessackdata_s3 || mshr_hintack_s3) && req_s3.tagWen ||
+//      metaW_valid_s3_c
+//    )
   io.tagWReq.bits.set  := req_s3.set
-  io.tagWReq.bits.way  := req_s3.way
+  io.tagWReq.bits.way  := Mux(mshr_req_s3, req_s3.way, dirResult_s3.way)
   io.tagWReq.bits.wtag := req_s3.tag
 
 
@@ -628,7 +617,8 @@ class MainPipe(implicit p: Parameters) extends L2Module with noninclusive.HasCli
     mshr_grant_s3 & !task_s3.bits.selfHasData || mshr_accessackdata_s3 || mshr_accessack_s3 || mshr_hintack_s3 || mshr_putpartial_s3 || mshr_releaseack_s3,
     req_s3.fromC && !need_mshr_s3 || req_s3.fromA && !need_mshr_s3 && !mainpipe_release &&(!data_unready_s3 || req_put_full_s3)
   )
-  
+
+  assert(!((d_s3.valid || c_s3.valid) && !sink_resp_s3.valid && !req_s3.mshrTask), "d_s3.valid:%d  c_s3.valid:%d", d_s3.valid, c_s3.valid)
 
   c_s3.bits.task      := source_req_s3
   c_s3.bits.data.data := data_s3
@@ -639,24 +629,24 @@ class MainPipe(implicit p: Parameters) extends L2Module with noninclusive.HasCli
   d_s3.bits.data.data := data_s3
 
   /* ======== nested & prefetch ======== */
-  io.nestedwb.valid := !req_s3.mshrTask && task_s3.valid
+  io.nestedwb.valid := sink_req_s3 && task_s3.valid
   io.nestedwb.channel := req_s3.channel
   io.nestedwb.set := req_s3.set
   io.nestedwb.tag := req_s3.tag
   io.nestedwb.sourceId := req_s3.sourceId
   io.nestedwb.needMSHR := need_mshr_s3
 
-  io.nestedwb.b_toN := task_s3.valid && sinkB_req_s3 && req_s3.param === toN
-  io.nestedwb.b_toB := task_s3.valid && sinkB_req_s3 && req_s3.param === toB
-  io.nestedwb.b_clr_dirty := task_s3.valid && sinkB_req_s3 && meta_s3.dirty
+  io.nestedwb.b_toN := req_s3.param === toN
+  io.nestedwb.b_toB := req_s3.param === toB
+  io.nestedwb.b_clr_dirty := meta_s3.dirty
 
   // c_set_dirty is true iff Release has Data
-  io.nestedwb.c_set_dirty := task_s3.valid && sinkC_req_s3 && task_s3.bits.opcode === ReleaseData
-  io.nestedwb.c_toN := task_s3.valid && sinkC_req_s3 && isToN(task_s3.bits.param)
-  io.nestedwb.c_toB := task_s3.valid && sinkC_req_s3 && isToB(task_s3.bits.param)
-  io.nestedwb.c_client := reqClientOH & sinkC_req_s3
+  io.nestedwb.c_set_dirty := task_s3.bits.opcode === ReleaseData
+  io.nestedwb.c_toN := isToN(task_s3.bits.param)
+  io.nestedwb.c_toB := isToB(task_s3.bits.param)
+  io.nestedwb.c_client := reqClientOH
 
-  io.nestedwb.wakeupValid := !req_s3.mshrTask && task_s3.valid
+  io.nestedwb.wakeupValid := req_s3.mshrTask && task_s3.valid
   io.nestedwb.wakeupSourceId := req_s3.sourceId
 
   io.nestedwbData := bufResp_s3.asTypeOf(new DSBlock)

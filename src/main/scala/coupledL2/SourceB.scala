@@ -65,7 +65,7 @@ class SourceB(implicit p: Parameters) extends L2Module {
     }
     b.address := Cat(task.tag, task.set, 0.U(offsetBits.W))
     b.mask    := Fill(beatBytes, 1.U(1.W))
-    b.data := Cat(task.alias.getOrElse(0.U), 0.U(1.W)) // this is the same as HuanCun // TODO: for L3
+    b.data := Cat(task.alias.getOrElse(0.U), task.needData) // this is the same as HuanCun // TODO: for L3
     b.corrupt := false.B
     b
   }

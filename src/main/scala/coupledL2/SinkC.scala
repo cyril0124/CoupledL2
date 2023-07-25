@@ -44,6 +44,8 @@ class SinkC(implicit p: Parameters) extends L2Module {
     val releaseBufWrite = Flipped(new MSHRBufWrite)
     val bufRead = Input(ValidIO(new PipeBufferRead))
     val bufResp = Output(new PipeBufferResp)
+    val mshrStatus  = Vec(mshrsAll, Flipped(ValidIO(new MSHRBlockAInfo)))
+    val mshrFull = Input(Bool())
   })
   
   val (first, last, _, beat) = edgeIn.count(io.c)
@@ -65,6 +67,7 @@ class SinkC(implicit p: Parameters) extends L2Module {
   val nextPtr = PriorityEncoder(~bufValids)
   val nextPtrReg = RegEnable(nextPtr, 0.U.asTypeOf(nextPtr), io.c.fire() && isRelease && first && hasData)
 
+  val wayMask = WireInit(0.U(cacheParams.ways.W))
   def toTaskBundle(c: TLBundleC): TaskBundle = {
     val task = Wire(new TaskBundle)
     task := DontCare
@@ -108,7 +111,24 @@ class SinkC(implicit p: Parameters) extends L2Module {
     }
   }
 
-  taskArb.io.out.ready := io.toReqArb.ready
+  def getMSHRSameSetVec(valid: Bool, set: UInt) = {
+    val mshrSameSetVec = VecInit(io.mshrStatus.map { status =>
+      status.valid && valid && status.bits.set === set
+    })
+    mshrSameSetVec
+  }
+
+  def getMSHROccWayMask(sameSetVec: Vec[Bool]) = {
+    require(sameSetVec.getWidth == mshrsAll)
+
+    val mshrOccWayMask = VecInit(sameSetVec.zip(io.mshrStatus).map {
+      case (sameSet, status) =>
+        Mux(sameSet, UIntToOH(status.bits.way), 0.U(cacheParams.ways.W))
+    }.reduce(_ | _)).asUInt
+
+    mshrOccWayMask
+  }
+
   taskArb.io.in.zipWithIndex.foreach {
     case (in, i) =>
       in.valid := taskValids(i)
@@ -122,10 +142,22 @@ class SinkC(implicit p: Parameters) extends L2Module {
     beatValids(io.bufRead.bits.bufIdx).foreach(_ := false.B)
   }
 
-  val cValid = io.c.valid && isRelease && last
-  io.toReqArb.valid := cValid || taskArb.io.out.valid
+  val cValid = io.c.valid && isRelease && last // Release flow
+  val cValid_mshrSameSetVec = getMSHRSameSetVec(cValid, parseAddress(io.c.bits.address)._2)
+  val cValid_mshrOccWayMask = getMSHROccWayMask(cValid_mshrSameSetVec)
+
+  val taskArbValid = taskArb.io.out.valid
+  val taskArbValid_mshrSameSetVec = getMSHRSameSetVec(taskArbValid, taskArb.io.out.bits.set)
+  val taskArbValid_mshrOccWayMask = getMSHROccWayMask(taskArbValid_mshrSameSetVec)
+
+  val hasFreeWay = Mux(cValid, ~cValid_mshrOccWayMask.andR, ~taskArbValid_mshrOccWayMask.andR)
+
+  io.toReqArb.valid := (cValid || taskArb.io.out.valid) && hasFreeWay && !io.mshrFull
+  taskArb.io.out.ready := io.toReqArb.ready
+
   io.toReqArb.bits := Mux(taskArb.io.out.valid, taskArb.io.out.bits, toTaskBundle(io.c.bits))
   io.toReqArb.bits.bufIdx := Mux(taskArb.io.out.valid, taskArb.io.out.bits.bufIdx, nextPtrReg)
+  io.toReqArb.bits.wayMask := Mux(cValid, ~cValid_mshrOccWayMask, ~taskArbValid_mshrOccWayMask)
 
   io.resp.valid := io.c.valid && (first || last) && !isRelease
   io.resp.mshrId := 0.U // DontCare

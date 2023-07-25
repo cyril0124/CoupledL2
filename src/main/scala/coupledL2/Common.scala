@@ -234,6 +234,7 @@ class SourceBReq(implicit p: Parameters) extends L2Bundle {
   val param = UInt(bdWidth.W)
   val alias = aliasBitsOpt.map(_ => UInt(aliasBitsOpt.get.W))
   val clients = UInt(clientBits.W)
+  val needData = Bool()
 }
 
 class BlockInfo(implicit p: Parameters) extends L2Bundle {

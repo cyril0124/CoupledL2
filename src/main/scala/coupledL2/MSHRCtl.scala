@@ -86,8 +86,11 @@ class MSHRCtl(implicit p: Parameters) extends L2Module {
     /* status of s2 and s3 */
     val pipeStatusVec = Flipped(Vec(2, ValidIO(new PipeStatus)))
 
-    /* to ReqBuffer, to solve conflict */
+    /* to ReqBuffer / SinkC, to solve conflict */
     val toReqBuf = Vec(mshrsAll, ValidIO(new MSHRBlockAInfo))
+    val toSinkC = Output(new Bundle{
+      val mshrFull = Bool()
+    })
 
     /* for TopDown Monitor */
     val msStatus = topDownOpt.map(_ => Vec(mshrsAll, ValidIO(new MSHRStatus)))
@@ -160,6 +163,7 @@ class MSHRCtl(implicit p: Parameters) extends L2Module {
   /* Arbitrate MSHR task to RequestArbiter */
   fastArb(mshrs.map(_.io.tasks.mainpipe), io.mshrTask, Some("mshr_task"))
 
+  io.toSinkC.mshrFull := mshrFull
 
   io.releaseBufWriteId := ParallelPriorityMux(resp_sinkC_match_vec, (0 until mshrsAll).map(i => i.U))
 

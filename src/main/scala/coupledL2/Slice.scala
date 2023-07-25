@@ -190,6 +190,9 @@ class Slice()(implicit p: Parameters) extends L2Module with DontCareInnerLogic {
       p.recv_addr := DontCare
   }
 
+  sinkC.io.mshrStatus <> mshrCtl.io.toReqBuf
+  sinkC.io.mshrFull := mshrCtl.io.toSinkC.mshrFull
+
   /* input & output signals */
   val inBuf = cacheParams.innerBuf
   val outBuf = cacheParams.outerBuf

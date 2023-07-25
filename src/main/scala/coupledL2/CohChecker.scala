@@ -132,7 +132,9 @@ class CohChecker(implicit p: Parameters) extends L2Module {
   allocState.elements.foreach(_._2 := true.B)
 
   val replaceClientsState = ParallelMax(meta.clientStates)
-  val replaceNeedRelease = meta.state > replaceClientsState || meta.dirty && isT(meta.state)
+  val replaceNeedRelease = meta.state > replaceClientsState ||
+                            meta.dirty && meta.state === TIP  // TODO: check
+//                            meta.dirty && isT(meta.state) // TODO: check
   aNeedReplacement := req.fromA && !dirResult.hit && meta.state =/= INVALID && replaceNeedRelease // && (req_acquireBlock_s3 && !reqNeedT || transmitFromOtherClient)
 
   cacheAlias := false.B
@@ -177,7 +179,7 @@ class CohChecker(implicit p: Parameters) extends L2Module {
     // need replacement
     when(aNeedReplacement) {
       allocState.w_releaseack := false.B
-      allocState.w_release_sent := false.B
+      allocState.w_release_sent := false.B // MainPipe will schedule release task
 
       // need rprobe for release
       // Foe NINE, do nothing here.

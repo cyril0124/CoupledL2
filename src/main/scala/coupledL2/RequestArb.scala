@@ -152,7 +152,7 @@ class RequestArb(implicit p: Parameters) extends L2Module {
   io.sinkA.ready := sink_ready_basic && !block_A && !sinkB_valid && !sinkC_valid && !probeHelperValid // SinkC prior to SinkA & SinkB
   io.sinkB.ready := sinkB_ready && !probeHelperValid // SinkB prior to SinkA
   io.probeHelperTask.foreach( p => p.ready := sinkB_ready ) // TODO:
-  io.sinkC.ready := sink_ready_basic && !block_C
+  io.sinkC.ready := sink_ready_basic && !block_C && io.sinkC.valid
 
   val chnl_task_s1 = Wire(Valid(new TaskBundle()))
   val taskVec = if(cacheParams.inclusionPolicy == "NINE") Seq(C_task, probeHelper_task, B_task, A_task) else Seq(C_task, B_task, A_task)
