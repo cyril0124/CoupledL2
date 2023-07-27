@@ -10,7 +10,7 @@ test-top-l2:
 	mv build/TestTop_L2.v build/TestTop.v
 
 test-top-l3:
-	mill -i CoupledL2.test.runMain coupledL2.TestTop_L3 -td build
+	mill -i CoupledL2.test.runMain coupledL3.TestTop_L3 -td build
 	mv build/TestTop_L3.v build/TestTop.v
 
 test-top-l2standalone:
