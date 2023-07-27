@@ -262,8 +262,12 @@ class MainPipe(implicit p: Parameters) extends L2Module with noninclusive.HasCli
   /* ======== Resps to SinkA/B/C Reqs ======== */
   val sink_resp_s3 = WireInit(0.U.asTypeOf(Valid(new TaskBundle))) // resp for sinkA/B/C request that does not need to alloc mshr
   val mainpipe_release = a_need_replacement || c_need_replacement
-                            
-  val sink_resp_s3_a_promoteT = dirResult_s3.hit && isT(meta_s3.state)
+  
+  val exceptReqClientHasB = VecInit(clientDirResult_s3.metas.zipWithIndex.map{
+    case (meta, client) => 
+      Mux(reqClient === client.U, false.B, meta.state === BRANCH)
+  }).asUInt.orR
+  val sink_resp_s3_a_promoteT = dirResult_s3.hit && isT(meta_s3.state) && !exceptReqClientHasB
 
   sink_resp_s3.valid := task_s3.valid && !mshr_req_s3 && (!need_mshr_s3 || mainpipe_release)
   sink_resp_s3.bits := task_s3.bits
@@ -367,7 +371,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with noninclusive.HasCli
   assert(!(io.refillBufResp_s3.valid && io.releaseBufResp_s3.valid), "can not read both refillBuf and releaseBuf at the same time")
 
   val wen_a = req_put_full_s3 && io.toSinkA.putReqGood_s3
-  val wen_c = sinkC_req_s3 && isParamFromT(req_s3.param) && req_s3.opcode(0) && !need_mshr_s3
+  val wen_c = sinkC_req_s3 && req_s3.opcode(0) && !need_mshr_s3
   val wen = wen_c || wen_a || req_s3.dsWen && (mshr_grant_s3 || mshr_accessackdata_s3 || mshr_probeack_s3 || mshr_hintack_s3 || mshr_put_s3 || mshr_releaseack_s3)
 
   val need_data_on_hit_a = req_get_s3 || req_acquireBlock_s3 || req_put_partial_s3
@@ -439,8 +443,9 @@ class MainPipe(implicit p: Parameters) extends L2Module with noninclusive.HasCli
   val metaW_valid_s3_a = sinkA_req_s3 && !need_mshr_s3_a && !req_get_s3 && !req_prefetch_s3 && !req_put_s3 // get & prefetch that hit will not write meta
   val metaW_valid_s3_b = sinkB_req_s3 && !need_mshr_s3_b && dirResult_s3.hit && (meta_s3.state === TIP || meta_s3.state === BRANCH && req_s3.param === toN)
   val metaW_valid_s3_c = sinkC_req_s3 && !need_mshr_s3_c
-  val metaW_valid_s3_repl = mainpipe_release
+  val metaW_valid_s3_repl = false.B // !mshr_req_s3 && mainpipe_release
   val metaW_valid_s3_mshr = mshr_req_s3 && req_s3.metaWen
+  assert(PopCount(Seq(metaW_valid_s3_a, metaW_valid_s3_b, metaW_valid_s3_c, metaW_valid_s3_repl, metaW_valid_s3_mshr)) <= 1.U, "a:%d b:%d c:%d repl:%d mshr:%d", metaW_valid_s3_a, metaW_valid_s3_b, metaW_valid_s3_c, metaW_valid_s3_repl, metaW_valid_s3_mshr)
   if (cacheParams.name != "l3") { // L2
     require(clientBits == 1)
   }
@@ -507,10 +512,9 @@ class MainPipe(implicit p: Parameters) extends L2Module with noninclusive.HasCli
   val clientMetaW_valid_s3_mshr = mshr_req_s3 && req_s3.clientMetaWen
 
   val clientMetaW_s3_a    = WireInit(VecInit(Seq.fill(clientBits)(0.U.asTypeOf(new noninclusive.ClientMetaEntry))))
-  // val clientMetaW_s3_b    = WireInit(VecInit(Seq.fill(clientBits)(0.U.asTypeOf(new noninclusive.ClientMetaEntry))))
   val clientMetaW_s3_c    = WireInit(VecInit(Seq.fill(clientBits)(0.U.asTypeOf(new noninclusive.ClientMetaEntry))))
-  // val clientMetaW_s3_repl = WireInit(VecInit(Seq.fill(clientBits)(0.U.asTypeOf(new noninclusive.ClientMetaEntry))))
   val clientMetaW_s3_mshr = WireInit(VecInit(Seq.fill(clientBits)(0.U.asTypeOf(new noninclusive.ClientMetaEntry))))
+  assert(PopCount(Seq(clientMetaW_valid_s3_a, clientMetaW_valid_s3_c, clientMetaW_valid_s3_mshr)) <= 1.U, "a:%d c:%d mshr:%d", clientMetaW_valid_s3_a, clientMetaW_valid_s3_c, clientMetaW_valid_s3_mshr)
 
   clientMetaW_s3_a.zipWithIndex.foreach{
     case(clientMeta, client) =>
@@ -608,7 +612,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with noninclusive.HasCli
 
   c_s3.valid := task_s3.valid && Mux(
     mshr_req_s3,
-    mshr_release_s3 && !req_s3.fromC || mshr_probeack_s3 && !req_s3.fromProbeHelper, // We won't send resp for the ProbeHepler request, since it is an inner request not an outer request.
+    mshr_release_s3 && !req_s3.fromC && !data_unready_s3 || mshr_probeack_s3 && !req_s3.fromProbeHelper, // We won't send resp for the ProbeHepler request, since it is an inner request not an outer request.
     req_s3.fromB && !need_mshr_s3 && !data_unready_s3 && !req_s3.fromProbeHelper
   )
   
@@ -635,6 +639,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with noninclusive.HasCli
   io.nestedwb.tag := req_s3.tag
   io.nestedwb.sourceId := req_s3.sourceId
   io.nestedwb.needMSHR := need_mshr_s3
+  io.nestedwb.way := dirResult_s3.way
 
   io.nestedwb.b_toN := req_s3.param === toN
   io.nestedwb.b_toB := req_s3.param === toB
@@ -646,7 +651,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with noninclusive.HasCli
   io.nestedwb.c_toB := isToB(task_s3.bits.param)
   io.nestedwb.c_client := reqClientOH
 
-  io.nestedwb.wakeupValid := req_s3.mshrTask && task_s3.valid
+  io.nestedwb.wakeupValid := req_s3.mshrTask && task_s3.valid && req_s3.fromC
   io.nestedwb.wakeupSourceId := req_s3.sourceId
 
   io.nestedwbData := bufResp_s3.asTypeOf(new DSBlock)
@@ -869,7 +874,10 @@ class MainPipe(implicit p: Parameters) extends L2Module with noninclusive.HasCli
   assert(!(d_s4.valid && d_s4.bits.task.opcode === 7.U), "d_s4 invalid opcode: 7  mshrTask:%d mshrId:%d Tag:0x%x Set:0x%x", task_s4.bits.mshrTask, task_s4.bits.mshrId, task_s4.bits.tag, task_s4.bits.set)
   assert(!(d_s5.valid && d_s5.bits.task.opcode === 7.U), "d_s5 invalid opcode: 7  mshrTask:%d mshrId:%d Tag:0x%x Set:0x%x", task_s5.bits.mshrTask, task_s5.bits.mshrId, task_s5.bits.tag, task_s5.bits.set)
 
-
+  val s2HasGrant = task_s2.valid && task_s2.bits.mshrTask && task_s2.bits.fromA && (task_s2.bits.opcode === GrantData || task_s2.bits.opcode === Grant)
+  val s3HasRelease = task_s3.valid && !task_s3.bits.mshrTask && task_s3.bits.fromC && (task_s3.bits.opcode === ReleaseData || task_s3.bits.opcode === Release)
+  val s2s3SameSet = task_s2.valid && task_s3.valid && task_s2.bits.set === task_s3.bits.set
+  assert(!(s2HasGrant && s3HasRelease && s2s3SameSet), "Release may not be able to nest Acquire")
 
   // --------------------------------------------------------------------------
   //  Performance counters

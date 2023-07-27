@@ -132,9 +132,10 @@ class CohChecker(implicit p: Parameters) extends L2Module {
   allocState.elements.foreach(_._2 := true.B)
 
   val replaceClientsState = ParallelMax(meta.clientStates)
+  // When replacing a block in data array, it is not always necessary to send Release,
+  // but only when state perm > clientStates' perm or replacing a dirty block
   val replaceNeedRelease = meta.state > replaceClientsState ||
-                            meta.dirty && meta.state === TIP  // TODO: check
-//                            meta.dirty && isT(meta.state) // TODO: check
+                            meta.dirty && meta.state === TIP
   aNeedReplacement := req.fromA && !dirResult.hit && meta.state =/= INVALID && replaceNeedRelease // && (req_acquireBlock_s3 && !reqNeedT || transmitFromOtherClient)
 
   cacheAlias := false.B

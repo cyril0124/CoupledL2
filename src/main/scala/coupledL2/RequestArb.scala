@@ -151,8 +151,8 @@ class RequestArb(implicit p: Parameters) extends L2Module {
   val probeHelperFire = probeHelperValid & sinkB_ready
   io.sinkA.ready := sink_ready_basic && !block_A && !sinkB_valid && !sinkC_valid && !probeHelperValid // SinkC prior to SinkA & SinkB
   io.sinkB.ready := sinkB_ready && !probeHelperValid // SinkB prior to SinkA
-  io.probeHelperTask.foreach( p => p.ready := sinkB_ready ) // TODO:
-  io.sinkC.ready := sink_ready_basic && !block_C && io.sinkC.valid
+  io.probeHelperTask.foreach( p => p.ready := sinkB_ready )
+  io.sinkC.ready := sink_ready_basic && !block_C
 
   val chnl_task_s1 = Wire(Valid(new TaskBundle()))
   val taskVec = if(cacheParams.inclusionPolicy == "NINE") Seq(C_task, probeHelper_task, B_task, A_task) else Seq(C_task, B_task, A_task)
@@ -213,7 +213,7 @@ class RequestArb(implicit p: Parameters) extends L2Module {
       task_s2.bits.opcode === AccessAckData || task_s2.bits.opcode === HintAck && task_s2.bits.dsWen || task_s2.bits.opcode === PutPartialData && !task_s2.bits.putHit && task_s2.bits.opcodeIsReq)
   // For GrantData, read refillBuffer
   // Caution: GrantData-alias may read DataStorage or ReleaseBuf instead
-  val selfHasData = if(cacheParams.name == "l3") task_s2.bits.selfHasData else false.B
+  val selfHasData = task_s2.bits.selfHasData
   
   io.refillBufRead_s2.valid := mshrTask_s2 && !task_s2.bits.useProbeData && mshrTask_s2_a_upwards && !selfHasData
   io.refillBufRead_s2.id := task_s2.bits.mshrId

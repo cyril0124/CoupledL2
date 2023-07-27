@@ -128,6 +128,7 @@ class MSHRStatus(implicit p: Parameters) extends L2Bundle with HasChannelBits {
   val alias = aliasBitsOpt.map(_ => UInt(aliasBitsOpt.get.W))
   val aliasTask = aliasBitsOpt.map(_ => Bool())
   val nestB = Bool()
+  val nestC = Bool()
   val needProbeAckData = Bool() // only for B reqs
   val pbIdx = UInt(mshrBits.W)
   val bufIdx = UInt(bufIdxBits.W) // idx of SinkC buffer, only for NINE
@@ -158,6 +159,7 @@ class MSHRBlockAInfo(implicit p: Parameters) extends L2Bundle {
   val way = UInt(wayBits.W)
   val reqTag = UInt(tagBits.W)
   val willFree = Bool()
+  val isChannelC = Bool() // TODO: block same set channel c task
 
   // to block Acquire for data about to be replaced until Release done
   val needRelease = Bool()
@@ -249,6 +251,7 @@ class NestedWriteback(implicit p: Parameters) extends L2Bundle with HasChannelBi
   val tag = UInt(tagBits.W)
   val sourceId = UInt(sourceIdBits.W)
   val needMSHR = Bool()
+  val way = UInt(wayBits.W)
   val b_toN = Bool()
   val b_toB = Bool()
   val b_clr_dirty = Bool()

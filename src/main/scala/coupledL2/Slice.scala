@@ -47,7 +47,7 @@ class Slice()(implicit p: Parameters) extends L2Module with DontCareInnerLogic {
   val dataStorage = Module(new DataStorage())
   val refillUnit = Module(new RefillUnit())
   val sinkA = Module(new SinkA)
-  val sinkC = Module(new SinkC) // or ReleaseUnit?
+  val sinkC = Module(new SinkC_1)
   val sourceC = Module(new SourceC)
   val grantBuf = if (!useFIFOGrantBuffer) Module(new GrantBuffer) else Module(new GrantBufferFIFO)
   val refillBuf = Module(new MSHRBuffer(wPorts = 2))
