@@ -34,10 +34,13 @@ class CohChecker(implicit p: Parameters) extends L3Module {
         val cacheAlias = Bool()
         val aNeedReplacement = Bool()
         val cNeedReplacement = Bool()
+        val ctrlNeedReleasse = Bool()
         val aNeedProbe = Bool()
+        val ctrlNeedProbe = Bool()
         val aNeedMSHR = Bool()
         val bNeedMSHR = Bool()
         val cNeedMSHR = Bool()
+        val ctrlNeedMSHR = Bool()
         val needMSHR = Bool()
       })
     }
@@ -50,11 +53,12 @@ class CohChecker(implicit p: Parameters) extends L3Module {
   val metaError = dirResult.error
 
   val req      = io.in.task.bits
-  val reqNeedT = needT(req.opcode, req.param)
   val mshrReq  = req.mshrTask
-  val sinkReq  = !mshrReq
-  val sinkReqA = !mshrReq && req.fromA
-  val sinkReqC = !mshrReq && req.fromC
+  val ctrlReq = req.fromCtrlUnit && !mshrReq
+  val sinkReq  = !mshrReq && !ctrlReq
+  val sinkReqA = !mshrReq && req.fromA && !ctrlReq
+  val sinkReqC = !mshrReq && req.fromC && !ctrlReq
+  val reqNeedT = needT(req.opcode, req.param) || CMO.needT(ctrlReq, req.param)
 
   val reqAcquire      = sinkReqA && (req.opcode === AcquireBlock || req.opcode === AcquirePerm)
   val reqAcquireBlock = sinkReqA && req.opcode === AcquireBlock
@@ -63,6 +67,11 @@ class CohChecker(implicit p: Parameters) extends L3Module {
   val reqPutFull      = sinkReqA && req.opcode === PutFullData
   val reqPutPartial   = sinkReqA && req.opcode === PutPartialData
   val reqPut          = reqPutFull || reqPutPartial
+
+  val reqInval = ctrlReq && req.param === CMO.CBO_INVAL
+  val reqClean = ctrlReq && req.param === CMO.CBO_CLEAN
+  val reqFlus = ctrlReq && req.param === CMO.CBO_FLUS
+  val reqZero = ctrlReq && req.param === CMO.CBO_ZERO
 
 
   // Clients releted signal // TODO: passed from outer MainPipe ??
@@ -125,6 +134,12 @@ class CohChecker(implicit p: Parameters) extends L3Module {
   val bNeedMSHR        = WireInit(false.B)
   val cNeedMSHR        = WireInit(false.B)
   val needMSHR         = WireInit(false.B)
+  // TODO: consider cache sys not has TIP should acquire when ZERO
+  val ctrlNeedAcquire  = WireInit(false.B)
+  val ctrlNeedProbe    = WireInit(false.B)
+  val ctrlNeedRelease = WireInit(false.B)
+  val ctrlNeedProbeackThrough = WireInit(false.B)
+  val ctrlNeedMSHR     = WireInit(false.B)
 
 
   // Allocation of MSHR: new request only
@@ -136,6 +151,7 @@ class CohChecker(implicit p: Parameters) extends L3Module {
   // but only when state perm > clientStates' perm or replacing a dirty block
   val replaceNeedRelease = meta.state > replaceClientsState ||
                             meta.dirty && meta.state === TIP
+
   aNeedReplacement := req.fromA && !dirResult.hit && meta.state =/= INVALID && replaceNeedRelease // && (req_acquireBlock_s3 && !reqNeedT || transmitFromOtherClient)
 
   cacheAlias := false.B
@@ -154,12 +170,18 @@ class CohChecker(implicit p: Parameters) extends L3Module {
 
   cNeedReplacement := req.fromC && !dirResult.hit && dirResult.meta.state =/= INVALID && replaceNeedRelease
 
+  ctrlNeedAcquire := ctrlReq && reqZero && !isT(highestState)
+  ctrlNeedProbe := ctrlReq && hasClientHit
+  ctrlNeedRelease := ctrlReq && dirResult.hit && !reqInval && !reqZero && ((reqClean || reqFlus) && meta.dirty) && !hasClientHit // when clientHit: 1. client data is dirty, release client's data 2. client data is clean, dont send release
+  ctrlNeedProbeackThrough := ctrlReq && hasClientHit && (reqFlus || reqClean) // non-includsive: CLEAN will not save block when self dont have this block (selfData(probeNtoN or probeAck) or selfData -> releasedata)
+
   assert(reqPutPartial =/= true.B, "TODO: reqPutPartial")
+  ctrlNeedMSHR := ctrlReq && (ctrlNeedProbe || ctrlNeedRelease || ctrlNeedAcquire)
   aNeedMSHR := sinkReqA && ( aNeedAcquire || aNeedProbe || aTrigProbeHelper || aNeedReplacement || cacheAlias || reqPutPartial)
   bNeedMSHR := req.fromProbeHelper && req.fromB && hasClientHit
   cNeedMSHR := sinkReqC && cNeedReplacement // TODO: NINE
 
-  needMSHR := (aNeedMSHR || bNeedMSHR || cNeedMSHR) && !metaError
+  needMSHR := (aNeedMSHR || bNeedMSHR || cNeedMSHR || ctrlNeedMSHR) && !metaError
 
   // s_refill:                            need to schedule GrantData for the reqClient
   // w_grantack:                          need to wait for GrantAck from reqClient
@@ -236,6 +258,32 @@ class CohChecker(implicit p: Parameters) extends L3Module {
     }
   }
 
+  when(ctrlReq) {
+    when(ctrlNeedMSHR){
+      allocState.s_releaseack := false.B // Ctrl dont send releaseack but it should write meta & data
+    }
+    when(ctrlNeedAcquire){
+      allocState.s_acquire := false.B
+      allocState.w_grantfirst := false.B
+      allocState.w_grantlast := false.B
+      allocState.w_grant := false.B
+    }
+    when(ctrlNeedRelease) {
+      allocState.w_releaseack := false.B
+      allocState.w_release_sent := false.B // MainPipe will schedule release task
+    }
+    when(ctrlNeedProbe){
+      allocState.s_rprobe := false.B
+      allocState.w_rprobeackfirst := false.B
+      allocState.w_rprobeacklast := false.B
+      when(ctrlNeedProbeackThrough){
+        allocState.s_release := false.B
+        allocState.w_releaseack := false.B
+        allocState.s_releaseack := true.B // In this case release will help write client dir
+      }
+    }
+  }
+
 
   assert(
     RegNext(!(sinkReqC && !clientDirResult.hits.asUInt.orR)),
@@ -268,6 +316,7 @@ class CohChecker(implicit p: Parameters) extends L3Module {
   mshrTask.bufIdx := req.bufIdx // SinkC buf index
   mshrTask.fromL3pft.foreach(_ := req.fromL3pft.get)
   mshrTask.needHint.foreach(_ := req.needHint.get)
+  mshrTask.fromCtrlUnit := req.fromCtrlUnit
   mshrTask.fromProbeHelper := req.fromProbeHelper
   mshrTask.way := dirResult.way
   mshrTask.reqSource := req.reqSource
@@ -286,5 +335,9 @@ class CohChecker(implicit p: Parameters) extends L3Module {
   io.out.flags.bNeedMSHR := bNeedMSHR
   io.out.flags.cNeedMSHR := cNeedMSHR
   io.out.flags.needMSHR := needMSHR
+
+  io.out.flags.ctrlNeedProbe := ctrlNeedProbe
+  io.out.flags.ctrlNeedReleasse := ctrlNeedRelease
+  io.out.flags.ctrlNeedMSHR := ctrlNeedMSHR
 
 }

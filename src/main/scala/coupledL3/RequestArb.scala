@@ -41,6 +41,8 @@ class RequestArb(implicit p: Parameters) extends L3Module {
     val mshrTask = Flipped(DecoupledIO(new TaskBundle))
     val probeHelperTask = if(cacheParams.inclusionPolicy == "NINE") Some(Flipped(DecoupledIO(new TaskBundle))) else None
 
+    val ctrlReq  = Flipped(DecoupledIO(new CtrlReq))
+
     /* read/write directory */
     val dirRead_s1 = DecoupledIO(new DirRead())  // To directory, read meta/tag
 
@@ -71,6 +73,34 @@ class RequestArb(implicit p: Parameters) extends L3Module {
       val blockSinkA = Bool()
     })
   })
+  /* ======== CtrlReq to TaskBundle ======== */
+  // CtrlReq -> C task
+  val ctrlTask = Wire(new TaskBundle)
+  ctrlTask := DontCare
+  ctrlTask.fromCtrlUnit := true.B
+  ctrlTask.set := io.ctrlReq.bits.set
+  ctrlTask.tag := io.ctrlReq.bits.tag
+  ctrlTask.off := 0.U
+  ctrlTask.opcode := Release
+  ctrlTask.param := io.ctrlReq.bits.cmd
+  ctrlTask.channel := "b100".U
+  ctrlTask.size := log2Up(cacheParams.blockBytes).U
+  ctrlTask.sourceId := DontCare
+  ctrlTask.bufIdx := DontCare
+  ctrlTask.needHint.foreach(_ := false.B)
+  ctrlTask.alias.foreach(_ := 0.U)
+  ctrlTask.needProbeAckData := false.B
+  ctrlTask.wayMask := Fill(cacheParams.ways, "b1".U)
+  ctrlTask.dirty := false.B // ignored
+  ctrlTask.reqSource := MemReqSource.NoWhere.id.U // Ignore
+  // Mux
+  val cTask = Wire(Decoupled(new TaskBundle))
+  cTask.bits := ctrlTask
+  cTask.bits := Mux(io.ctrlReq.valid, ctrlTask, io.sinkC.bits)
+  io.ctrlReq.ready := cTask.ready
+  io.sinkC.ready := cTask.ready
+  cTask.valid := io.ctrlReq.valid || io.sinkC.valid
+
   /* ======== Reset ======== */
   val resetFinish = RegInit(false.B)
   val resetIdx = RegInit((cacheParams.sets - 1).U)
@@ -122,13 +152,13 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   val A_task = io.sinkA.bits
   val B_task = fromTLBtoTaskBundle(io.sinkB.bits)
   val probeHelper_task = io.probeHelperTask.getOrElse(0.U.asTypeOf(Decoupled(new TaskBundle))).bits
-  val C_task = io.sinkC.bits
+  val C_task = cTask.bits
   val block_A = io.fromMSHRCtl.blockA_s1 || io.fromMainPipe.blockA_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockA_s1 || io.fromProbeHelper.blockSinkA
   val block_B = io.fromMSHRCtl.blockB_s1 || io.fromMainPipe.blockB_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockB_s1
   val block_C = io.fromMSHRCtl.blockC_s1 || io.fromMainPipe.blockC_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockC_s1
 
 
-  val sinkC_valid = io.sinkC.valid && !block_C
+  val sinkC_valid = cTask.valid && !block_C
   val sinkB_valid = io.sinkB.valid && !block_B
   val probeHelperValid = io.probeHelperTask.getOrElse(0.U.asTypeOf(Decoupled(new TaskBundle))).valid && !block_B
   val sinkA_valid = io.sinkA.valid && !block_A
@@ -152,7 +182,7 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   io.sinkA.ready := sink_ready_basic && !block_A && !sinkB_valid && !sinkC_valid && !probeHelperValid // SinkC prior to SinkA & SinkB
   io.sinkB.ready := sinkB_ready && !probeHelperValid // SinkB prior to SinkA
   io.probeHelperTask.foreach( p => p.ready := sinkB_ready )
-  io.sinkC.ready := sink_ready_basic && !block_C
+  cTask.ready := sink_ready_basic && !block_C
 
   val chnl_task_s1 = Wire(Valid(new TaskBundle()))
   val taskVec = if(cacheParams.inclusionPolicy == "NINE") Seq(C_task, probeHelper_task, B_task, A_task) else Seq(C_task, B_task, A_task)
@@ -176,26 +206,26 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   io.dirRead_s1.bits.replacerInfo.reqSource := task_s1.bits.reqSource
 
   // probe block same-set A req for s2/s3
-  io.sinkEntrance.valid := io.sinkB.fire || io.sinkC.fire || probeHelperFire
-//  io.sinkEntrance.bits.tag  := Mux(io.sinkC.fire, C_task.tag, B_task.tag)
-//  io.sinkEntrance.bits.set  := Mux(io.sinkC.fire, C_task.set, B_task.set)
+  io.sinkEntrance.valid := io.sinkB.fire || cTask.fire || probeHelperFire
+//  io.sinkEntrance.bits.tag  := Mux(cTask.fire, C_task.tag, B_task.tag)
+//  io.sinkEntrance.bits.set  := Mux(cTask.fire, C_task.set, B_task.set)
 
   val sink_tag = if (cacheParams.inclusionPolicy == "NINE")
                     PriorityMux(Seq(
-                      io.sinkC.fire -> C_task.tag,
+                      cTask.fire -> C_task.tag,
                       probeHelperFire -> probeHelper_task.tag,
                       io.sinkB.fire -> B_task.tag
                     ))
                   else
-                    Mux(io.sinkC.fire, C_task.tag, B_task.tag)
+                    Mux(cTask.fire, C_task.tag, B_task.tag)
   val sink_set = if (cacheParams.inclusionPolicy == "NINE")
                     PriorityMux(Seq(
-                      io.sinkC.fire -> C_task.set,
+                      cTask.fire -> C_task.set,
                       probeHelperFire -> probeHelper_task.set,
                       io.sinkB.fire -> B_task.set
                     ))
                   else
-                    Mux(io.sinkC.fire, C_task.set, B_task.set)
+                    Mux(cTask.fire, C_task.set, B_task.set)
   io.sinkEntrance.bits.tag  := sink_tag
   io.sinkEntrance.bits.set  := sink_set
 
@@ -251,26 +281,26 @@ class RequestArb(implicit p: Parameters) extends L3Module {
 
   XSPerfAccumulate(cacheParams, "sinkA_req", io.sinkA.fire())
   XSPerfAccumulate(cacheParams, "sinkB_req", io.sinkB.fire())
-  XSPerfAccumulate(cacheParams, "sinkC_req", io.sinkC.fire())
+  XSPerfAccumulate(cacheParams, "sinkC_req", cTask.fire())
   
   XSPerfAccumulate(cacheParams, "sinkA_stall", io.sinkA.valid && !io.sinkA.ready)
   XSPerfAccumulate(cacheParams, "sinkB_stall", io.sinkB.valid && !io.sinkB.ready)
-  XSPerfAccumulate(cacheParams, "sinkC_stall", io.sinkC.valid && !io.sinkC.ready)
+  XSPerfAccumulate(cacheParams, "sinkC_stall", cTask.valid && !cTask.ready)
 
   XSPerfAccumulate(cacheParams, "sinkA_stall_by_mshr", io.sinkA.valid && io.fromMSHRCtl.blockA_s1)
   XSPerfAccumulate(cacheParams, "sinkB_stall_by_mshr", io.sinkB.valid && io.fromMSHRCtl.blockB_s1)
 
   XSPerfAccumulate(cacheParams, "sinkA_stall_by_mainpipe", io.sinkA.valid && io.fromMainPipe.blockA_s1)
   XSPerfAccumulate(cacheParams, "sinkB_stall_by_mainpipe", io.sinkB.valid && io.fromMainPipe.blockB_s1)
-  XSPerfAccumulate(cacheParams, "sinkC_stall_by_mainpipe", io.sinkC.valid && io.fromMainPipe.blockC_s1)
+  XSPerfAccumulate(cacheParams, "sinkC_stall_by_mainpipe", cTask.valid && io.fromMainPipe.blockC_s1)
 
   XSPerfAccumulate(cacheParams, "sinkA_stall_by_grantbuf", io.sinkA.valid && io.fromGrantBuffer.blockSinkReqEntrance.blockA_s1)
   XSPerfAccumulate(cacheParams, "sinkB_stall_by_grantbuf", io.sinkB.valid && io.fromGrantBuffer.blockSinkReqEntrance.blockB_s1)
-  XSPerfAccumulate(cacheParams, "sinkC_stall_by_grantbuf", io.sinkC.valid && io.fromGrantBuffer.blockSinkReqEntrance.blockC_s1)
+  XSPerfAccumulate(cacheParams, "sinkC_stall_by_grantbuf", cTask.valid && io.fromGrantBuffer.blockSinkReqEntrance.blockC_s1)
 
   XSPerfAccumulate(cacheParams, "sinkA_stall_by_dir", io.sinkA.valid && !block_A && !io.dirRead_s1.ready)
   XSPerfAccumulate(cacheParams, "sinkB_stall_by_dir", io.sinkB.valid && !block_B && !io.dirRead_s1.ready)
-  XSPerfAccumulate(cacheParams, "sinkC_stall_by_dir", io.sinkC.valid && !block_C && !io.dirRead_s1.ready)
+  XSPerfAccumulate(cacheParams, "sinkC_stall_by_dir", cTask.valid && !block_C && !io.dirRead_s1.ready)
 
   XSPerfAccumulate(cacheParams, "sinkA_stall_by_sinkB", io.sinkA.valid && sink_ready_basic && !block_A && sinkValids(1) && !sinkValids(0))
   XSPerfAccumulate(cacheParams, "sinkA_stall_by_sinkC", io.sinkA.valid && sink_ready_basic && !block_A && sinkValids(0))
@@ -278,5 +308,5 @@ class RequestArb(implicit p: Parameters) extends L3Module {
 
   XSPerfAccumulate(cacheParams, "sinkA_stall_by_mshrTask", io.sinkA.valid && mshr_task_s1.valid)
   XSPerfAccumulate(cacheParams, "sinkB_stall_by_mshrTask", io.sinkB.valid && mshr_task_s1.valid)
-  XSPerfAccumulate(cacheParams, "sinkC_stall_by_mshrTask", io.sinkC.valid && mshr_task_s1.valid)
+  XSPerfAccumulate(cacheParams, "sinkC_stall_by_mshrTask", cTask.valid && mshr_task_s1.valid)
 }

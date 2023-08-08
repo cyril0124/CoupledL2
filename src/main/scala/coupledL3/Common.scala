@@ -62,6 +62,9 @@ class TaskBundle(implicit p: Parameters) extends L3Bundle with HasChannelBits wi
   val aliasTask = aliasBitsOpt.map(_ => Bool()) // Anti-alias
   val useProbeData = Bool()               // data source, true for ReleaseBuf and false for RefillBuf
 
+  val fromCtrlUnit = Bool()
+  val ctrlUnitSendRelease = Bool()
+
   val fromProbeHelper = Bool()
 
   val selfHasData = Bool()
@@ -138,6 +141,7 @@ class MSHRStatus(implicit p: Parameters) extends L3Bundle with HasChannelBits {
   val fromL3pft = prefetchOpt.map(_ => Bool())
   val needHint = prefetchOpt.map(_ => Bool())
   val fromProbeHelper = Bool()
+  val fromCtrlUnit = Bool()
   val will_free = Bool()
   // for TopDown usage
   val reqSource = UInt(MemReqSource.reqSourceBits.W)

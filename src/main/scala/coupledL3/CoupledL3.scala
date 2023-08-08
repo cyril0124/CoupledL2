@@ -245,6 +245,9 @@ class CoupledL3(implicit p: Parameters) extends LazyModule with HasCoupledL3Para
     case _ => None
   }
 
+  val ctrl_unit = cacheParams.ctrl.map(_ => LazyModule(new CtrlUnit(node)))
+  val ctlnode = ctrl_unit.map(_.ctlnode)
+
   lazy val module = new LazyModuleImp(this) {
     val banks = node.in.size
     val bankBits = if (banks == 1) 0 else log2Up(banks)
@@ -368,6 +371,25 @@ class CoupledL3(implicit p: Parameters) extends LazyModule with HasCoupledL3Para
 
         slice
     }
+
+    // connection between ctrlUnit and the slices
+    ctrl_unit.foreach { c =>
+      val ctl_reqs = slices.zipWithIndex.map {
+        case (s, i) => Pipeline.pipeTo(s.io.ctrlReq, depth = 2, pipe = false, name = Some(s"req_buffer_$i"))
+      }
+      val bank_match = slices.map(_ => Wire(Bool()))
+      c.module.io_req.ready := Mux1H(bank_match, ctl_reqs.map(_.ready))
+      for ((s, i) <- ctl_reqs.zipWithIndex) {
+        bank_match(i) := bank_eq(c.module.io_req.bits.set, i, bankBits)
+        s.valid := c.module.io_req.valid && bank_match(i)
+        s.bits := c.module.io_req.bits
+      }
+    }
+    if (ctrl_unit.isEmpty) {
+      slices.foreach(_.io.ctrlReq <> DontCare)
+      slices.foreach(_.io.ctrlReq.valid := false.B)
+    }
+
     val l1Hint_arb = Module(new Arbiter(new L3ToL1Hint(), slices.size))
     val slices_l1Hint = slices.zipWithIndex.map {
       case (s, i) => Pipeline(s.io.l1Hint, depth = 1, pipe = false, name = Some(s"l1Hint_buffer_$i"))

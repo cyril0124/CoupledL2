@@ -163,6 +163,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
     req.fromL3pft.foreach(_ := msTask.fromL3pft.get)
     req.reqSource := msTask.reqSource
     req.fromProbeHelper := msTask.fromProbeHelper
+    req.fromCtrlUnit := msTask.fromCtrlUnit
     gotT        := false.B
     gotDirty    := false.B
     gotGrantData := false.B
@@ -182,12 +183,13 @@ class MSHR(implicit p: Parameters) extends L3Module {
   // --------------------------------------------------------------------------
   val meta_no_client = !clientDirResult.hits.asUInt.orR
 
-  val req_needT = needT(req.opcode, req.param) // Put / Acquire.NtoT / Acquire.BtoT / Hint.prefetch_write
+  val req_needT = needT(req.opcode, req.param) || CMO.needT(req.fromCtrlUnit, req.param)// Put / Acquire.NtoT / Acquire.BtoT / Hint.prefetch_write / CBO_CLEAN / CBO_ZERO
   val req_acquire = req.opcode === AcquireBlock && req.fromA || req.opcode === AcquirePerm // AcquireBlock and Probe share the same opcode
   val req_acquirePerm = req.opcode === AcquirePerm
   val req_putfull = req.opcode === PutFullData
   val req_put = req.opcode === PutFullData || req.opcode === PutPartialData
   val req_get = req.opcode === Get
+  val req_ctrl = req.fromCtrlUnit
   val req_prefetch = req.opcode === Hint
   val req_promoteT = (req_acquire || req_get || req_prefetch) && Mux(dirResult.hit, meta_no_client && meta.state === TIP, gotT)
 
@@ -206,7 +208,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
   io.tasks.source_b.valid := (!state.s_pprobe || !state.s_rprobe) && state.w_release_sent
     
   val mp_release_valid = !state.s_release && state.w_rprobeacklast && state.w_pprobeacklast && state.w_probehelper_done && !waitNestedC && !nestedReleaseValid
-  val mp_releaseack_valid = !state.s_releaseack && state.w_release_sent
+  val mp_releaseack_valid = (!req_ctrl && !state.s_releaseack && state.w_release_sent) || (req_ctrl && !state.s_releaseack && state.s_acquire && state.w_grantlast && state.w_rprobeacklast && state.s_release && state.w_release_sent && state.w_releaseack) // TODO: now only consider ZERO CLEAN
   val mp_probeack_valid = !state.s_probeack && state.w_pprobeacklast && !waitNestedC
   val mp_grant_valid = !state.s_refill && state.w_grantlast && state.w_rprobeacklast && state.s_release && state.w_probehelper_done && !req_put && !waitNestedC && !nestedReleaseValid
   val mp_put_wb_valid = !state.s_put_wb && state.w_rprobeacklast && state.w_releaseack && state.w_pprobeacklast && state.w_grantlast && state.s_release && !waitNestedC // && state.s_refill
@@ -263,12 +265,16 @@ class MSHR(implicit p: Parameters) extends L3Module {
       assert(req.fromProbeHelper)
     }
     ob.param := Mux(
-      !state.s_pprobe, // only from ProbeHelper
-      req.param,
+      req_ctrl, // req from ctrl always probe toN
+      toN,
       Mux(
-        req_get && dirResult.hit && meta.state === TRUNK || req_acquire && !req_needT,
-        toB,
-        toN
+        !state.s_pprobe, // only from ProbeHelper
+        req.param,
+        Mux(
+          req_get && dirResult.hit && meta.state === TRUNK || req_acquire && !req_needT,
+          toB,
+          toN
+        )
       )
     )
 
@@ -277,7 +283,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
     dontTouch(temp_clientDirResultHits)
 
     ob.clients := Mux(
-      req.fromProbeHelper,
+      req.fromProbeHelper || req.fromCtrlUnit,
       clientDirResult.hits.asUInt,
       clientsExceptReqClientOH
     )
@@ -296,7 +302,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
     mp_release := DontCare
     mp_release.channel := req.channel
     mp_release.tag := Mux(
-                          req.fromProbeHelper, 
+                          req.fromProbeHelper || req.fromCtrlUnit,
                           req.tag, // turn probeack into release
                           dirResult.tag
                         )
@@ -324,6 +330,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
     mp_release.dirty := meta.dirty && meta.state =/= INVALID || probeDirty
 
     mp_release.fromProbeHelper := req.fromProbeHelper
+    mp_release.fromCtrlUnit := req.fromCtrlUnit
     when(req.fromProbeHelper) { // turn probeack into release
       mp_release.meta := MetaEntry()
       mp_release.metaWen := false.B
@@ -333,6 +340,40 @@ class MSHR(implicit p: Parameters) extends L3Module {
       mp_release.clientWay := clientDirResult.way
       mp_release.clientMetaWen := false.B
       mp_release.clientTagWen := false.B // NINE directory is inclusive
+      mp_release.clientSet := clientDirResult.set
+    }.elsewhen(req.fromCtrlUnit){ // turn releaseack into release
+      mp_release.metaWen := dirResult.hit
+      mp_release.tagWen := false.B
+      mp_release.dsWen := false.B
+
+      val newSelfState = WireInit(0.U(stateBits.W))
+      val newSelfClientState = WireInit(VecInit(Seq.fill(clientBits)(0.U(stateBits.W))))
+
+      newSelfState := MuxLookup(
+        req.param,
+        meta.state,
+        Seq(
+          CMO.CBO_INVAL -> INVALID,
+          CMO.CBO_CLEAN -> Mux(meta.state === TIP || meta.state === BRANCH, meta.state, stateAfterProbe),
+          CMO.CBO_FLUS -> INVALID,
+          CMO.CBO_ZERO -> TIP
+        )
+      )
+      assert(!((req.param === CMO.CBO_INVAL || req.param === CMO.CBO_ZERO) && !state.s_release), "CMO INVAL and ZERO cant send Release")
+
+      mp_release.meta := MetaEntry(
+        dirty = false.B,
+        state = newSelfState,
+        clientStates = newSelfClientState
+      )
+
+      mp_release.clientWay := clientDirResult.way
+      mp_release.clientMetaWen := true.B
+      mp_release.clientMeta.foreach(meta => meta.state := INVALID)
+      mp_release.clientTagWen := false.B // NINE directory is inclusive
+      mp_release.clientSet := clientDirResult.set
+
+      mp_release.ctrlUnitSendRelease := true.B
     }.otherwise{
       mp_release.meta := MetaEntry()
       mp_release.metaWen := !nestedReleaseNeedRelease
@@ -343,6 +384,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
       mp_release.clientMetaWen := !nestedReleaseNeedRelease
       mp_release.clientMeta.foreach( meta => meta.state := INVALID )
       mp_release.clientTagWen := false.B // NINE directory is inclusive
+      mp_release.clientSet := clientDirResult.set
     }
     mp_release
   }
@@ -424,43 +466,62 @@ class MSHR(implicit p: Parameters) extends L3Module {
     mp_releaseack.sourceId := req.source
     mp_releaseack.aliasTask.foreach(_ := false.B)
     mp_releaseack.bufIdx := req.bufIdx // index for SinkC buffer
+    mp_releaseack.fromCtrlUnit := req.fromCtrlUnit
     // mp_releaseack.useProbeData := true.B // read ReleaseBuf when useProbeData && opcode(0) is true
     
-    mp_releaseack.metaWen := true.B
+    mp_releaseack.metaWen := !req.fromCtrlUnit || (req.fromCtrlUnit && (dirResult.hit || req.param === CMO.CBO_ZERO))
 
     val newSelfState = WireInit(0.U(stateBits.W))
     val newSelfClientState = WireInit(VecInit(Seq.fill(clientBits)(0.U(stateBits.W))))
 
-    newSelfState := MuxLookup(
-                      req.param,
-                      meta.state,
-                      Seq(
-                        TtoT -> TRUNK,
-                        TtoB -> TIP,
-                        TtoN -> TIP,
-                        BtoN -> BRANCH
-                      )
-                    )
+    when(req.fromCtrlUnit){
+      newSelfState := MuxLookup(
+        req.param,
+        meta.state,
+        Seq(
+          CMO.CBO_INVAL -> INVALID,
+          CMO.CBO_CLEAN -> Mux(meta.state === TIP || meta.state === BRANCH, meta.state, stateAfterProbe),
+          CMO.CBO_FLUS -> INVALID,
+          CMO.CBO_ZERO -> TIP
+        )
+      )
+    }.otherwise{
+      newSelfState := MuxLookup(
+        req.param,
+        meta.state,
+        Seq(
+          TtoT -> TRUNK,
+          TtoB -> TIP,
+          TtoN -> TIP,
+          BtoN -> BRANCH
+        )
+      )
+    }
+
     
     newSelfClientState.zipWithIndex.foreach{
       case (selfClientState, client) => 
         selfClientState := Mux(
-                                reqClient === client.U, 
-                                Mux(
-                                  isToN(req.param), 
-                                  INVALID, 
+                              req.fromCtrlUnit,
+                              INVALID,
+                              Mux(
+                                  reqClient === client.U,
                                   Mux(
-                                    isToB(req.param), 
-                                    BRANCH, 
-                                    dirResult.meta.clientStates(client)
-                                  )
-                                ), 
-                              dirResult.meta.clientStates(client)
-                            )
+                                    isToN(req.param),
+                                    INVALID,
+                                    Mux(
+                                      isToB(req.param),
+                                      BRANCH,
+                                      dirResult.meta.clientStates(client)
+                                    )
+                                  ),
+                                dirResult.meta.clientStates(client)
+                              )
+        )
     }
 
     mp_releaseack.meta := MetaEntry(
-      dirty = true.B, // TODO: 
+      dirty = Mux(req.fromCtrlUnit,Mux(req.param === CMO.CBO_ZERO, true.B, false.B),true.B), // TODO
       state = newSelfState,
       clientStates = newSelfClientState
     )
@@ -469,10 +530,12 @@ class MSHR(implicit p: Parameters) extends L3Module {
     mp_releaseack.tagWen := !dirResult.hit
     mp_releaseack.dsWen := true.B
     
-    mp_releaseack.clientMetaWen := true.B
+    mp_releaseack.clientMetaWen := !req.fromCtrlUnit || (req.fromCtrlUnit && hasClientHit)
     mp_releaseack.clientMeta.zipWithIndex.foreach{
       case (clientMeta, client) => 
-        when(reqClient === client.U) {
+        when(req.fromCtrlUnit) {
+          clientMeta.state := INVALID
+        }.elsewhen(reqClient === client.U) {
           clientMeta.state := Mux(isToN(req.param), INVALID, BRANCH)
         }.otherwise {
           clientMeta.state := clientDirResult.metas(client).state
@@ -734,7 +797,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
 
   val probeAckDoneClient = RegInit(0.U(clientBits.W))
   val incomingProbeAckClient = WireInit(0.U(clientBits.W))
-  val probeClientsOH = Mux(req.fromProbeHelper,
+  val probeClientsOH = Mux(req.fromProbeHelper || req.fromCtrlUnit,
                           clientDirResult.hits.asUInt,  // ProbeHelper will probe all of the client block
                           clientDirResult.hits.asUInt & ~reqClientOH
                         )
@@ -754,7 +817,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
 
 
   // --------------------------------------------------------------------------
-  //  Accept D channel resp
+  //  Accept C channel resp
   // --------------------------------------------------------------------------
   when(c_resp.valid && io.status.bits.w_c_resp && io.status.valid) {
     incomingProbeAckClient := getClientBitOH(io.resps.sink_c.bits.source)

@@ -42,8 +42,22 @@ class TestTop_L3()(implicit p: Parameters) extends LazyModule {
     masterNode
   }
 
+  def createTLULNode(name: String, sources: Int): TLClientNode = {
+    val clientParameters = TLMasterPortParameters.v1(
+      Seq(TLMasterParameters.v1(
+        name = name,
+        sourceId = IdRange(0, sources),
+        supportsProbe = TransferSizes.none
+      ))
+    )
+    val clientNode = TLClientNode(Seq(clientParameters))
+    clientNode
+  }
+
   val fake_l2_nodes = (0 until 2) map( i => createClientNode(s"l2$i", 32))
-  val master_nodes = fake_l2_nodes
+//  val master_nodes = fake_l2_nodes
+  val fake_ctrl_node = createTLULNode(s"ctrl", 16)
+  val master_nodes = fake_l2_nodes ++ Seq(fake_ctrl_node)
 
   val l3 = LazyModule(new CoupledL3()(new Config((_, _, _) => {
       case L3ParamKey => L3Param(
@@ -53,9 +67,17 @@ class TestTop_L3()(implicit p: Parameters) extends LazyModule {
         sets = 32,
         inclusionPolicy = "NINE",
         clientCaches = Seq(L2ClientParam(aliasBitsOpt = None)),
-        echoField = Seq(DirtyField())
+        echoField = Seq(DirtyField()),
+        ctrl = Some(CacheCtrl(
+          address = 0x10000,
+          numCores = 1,
+          beatBytes = 8,
+        )),
       )
   })))
+
+  l3.ctlnode.get := TLBuffer.chainNode(4) := fake_ctrl_node
+
   val xbar = TLXbar()
   val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffL), beatBytes = 32))
 

@@ -33,11 +33,37 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   val io = IO(new Bundle {
     val in = Flipped(TLBundle(edgeIn.bundle))
     val out = TLBundle(edgeOut.bundle)
+    val ctrlReq = Flipped(Decoupled(new CtrlReq()))
     val l1Hint = Decoupled(new L3ToL1Hint())
     val prefetch = prefetchOpt.map(_ => Flipped(new PrefetchIO))
     val msStatus = topDownOpt.map(_ => Vec(mshrsAll, ValidIO(new MSHRStatus)))
     val dirResult = topDownOpt.map(_ => ValidIO(new DirResult))
   })
+
+  // CtrlReq -> C task
+  val ctrlTask = Wire(new TaskBundle)
+  ctrlTask := DontCare
+  ctrlTask.fromCtrlUnit := true.B
+  ctrlTask.set := io.ctrlReq.bits.set
+  ctrlTask.tag := io.ctrlReq.bits.tag
+  ctrlTask.off := 0.U
+  ctrlTask.opcode := Release
+  ctrlTask.param := io.ctrlReq.bits.cmd
+  ctrlTask.channel := "b100".U
+  ctrlTask.size := log2Up(cacheParams.blockBytes).U
+  ctrlTask.sourceId := DontCare
+  ctrlTask.bufIdx := DontCare
+  ctrlTask.needHint.foreach(_ := false.B)
+  ctrlTask.alias.foreach(_ := 0.U)
+  ctrlTask.needProbeAckData := false.B
+  ctrlTask.wayMask := Fill(cacheParams.ways, "b1".U)
+  ctrlTask.dirty := false.B // ignored
+  ctrlTask.reqSource := MemReqSource.NoWhere.id.U // Ignore
+  // toReqArb
+//  val ctrlToReqArb = Wire(Decoupled(new TaskBundle))
+//  ctrlToReqArb.valid := io.ctrlReq.valid
+//  ctrlToReqArb.bits := ctrlTask
+//  io.ctrlReq.ready := ctrlToReqArb.ready
 
   val reqArb = Module(new RequestArb())
   val a_reqBuf = Module(new RequestBuffer)
@@ -100,6 +126,21 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   reqArb.io.ATag := a_reqBuf.io.ATag
   reqArb.io.ASet := a_reqBuf.io.ASet
 
+  // reqcArb
+//  val reqcArb = Module(new Arbiter(Decoupled(new TaskBundle), 2))
+//  val reqC = Wire(Vec(2, Decoupled(new TaskBundle)))
+//  reqC(0) := ctrlToReqArb
+//  reqC(1) := sinkC.io.toReqArb
+//  reqcArb.io.in <> reqC
+//  reqcArb.io.out <> DontCare
+//  val reqC = Wire(Valid(new TaskBundle))
+//  when(io.ctrlReq.valid) {
+//    reqC.bits <> ctrlToReqArb.bits
+//  } .otherwise {
+//    reqC <> sinkC.io.toReqArb
+//  }
+
+  reqArb.io.ctrlReq <> io.ctrlReq
   reqArb.io.sinkC <> sinkC.io.toReqArb
   reqArb.io.dirRead_s1 <> directory.io.read
   reqArb.io.taskToPipe_s2 <> mainPipe.io.taskFromArb_s2
