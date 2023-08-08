@@ -75,6 +75,15 @@ case class DirtyField() extends BundleField(DirtyKey) {
   }
 }
 
+
+case class CacheCtrl
+(
+  address: BigInt,
+  beatBytes: Int = 8,
+  // used to generate core soft reset
+  numCores: Int = 1
+)
+
 case class L3Param
 (
   name: String = "L3",
@@ -88,6 +97,7 @@ case class L3Param
   replacement: String = "plru",
   mshrs: Int = 16,
   enableClockGate: Boolean = true,
+  ctrl: Option[CacheCtrl] = None,
   // dataEccCode: Option[String] = Some("secded"), // Option: "none", "identity", "parity", "sec", "secded"
   // tagEccCode: Option[String] = Some("secded"),
   dataEccCode: Option[String] = None, // Option: "none", "identity", "parity", "sec", "secded"
