@@ -61,6 +61,7 @@ trait HasCoupledL2Parameters {
   
   // Prefetch
   val prefetchOpt = cacheParams.prefetch
+  val sppMultiLevelRefillOpt = cacheParams.sppMultiLevelRefill
   val hasPrefetchBit = prefetchOpt.nonEmpty && prefetchOpt.get.hasPrefetchBit
   val topDownOpt = if(cacheParams.elaboratedTopDown) Some(true) else None
 
@@ -218,10 +219,26 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
     managerFn = managerPortParams
   )
 
-  val pf_recv_node: Option[BundleBridgeSink[PrefetchRecv]] = prefetchOpt match {
-    case Some(_: PrefetchReceiverParams) =>
-      Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
-    case _ => None
+ val pf_recv_node: Option[BundleBridgeSink[PrefetchRecv]] = prefetchOpt match {
+  case Some(receive: PrefetchReceiverParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
+  case Some(sms_sender_hyper: HyperPrefetchParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
+  case _ => None
+}
+
+  val spp_send_node: Option[BundleBridgeSource[LlcPrefetchRecv]] = prefetchOpt match {
+    case Some(hyper_pf: HyperPrefetchParams) =>
+      sppMultiLevelRefillOpt match{
+        case Some(receive: PrefetchReceiverParams) =>
+          Some(BundleBridgeSource(() => new LlcPrefetchRecv()))
+        case _ => None
+      }
+    case Some(spp_only: SPPParameters) =>
+      sppMultiLevelRefillOpt match{
+        case Some(receive: PrefetchReceiverParams) => 
+          Some(BundleBridgeSource(Some(() => new LlcPrefetchRecv())))
+        case _ => None
+      }
+    case _ => None //Spp not exist, can not use multl-level refill
   }
 
   lazy val module = new LazyModuleImp(this) {
@@ -269,13 +286,24 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
     val prefetcher = prefetchOpt.map(_ => Module(new Prefetcher()(pftParams)))
     val prefetchTrains = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchTrain()(pftParams)))))
     val prefetchResps = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchResp()(pftParams)))))
+    val prefetchEvicts = prefetchOpt.get match{
+      case hyper : HyperPrefetchParams =>
+        Some( Wire(Vec(banks, DecoupledIO(new PrefetchEvict()(pftParams)))))
+      case _ => None
+    }
     val prefetchReqsReady = WireInit(VecInit(Seq.fill(banks)(false.B)))
     prefetchOpt.foreach {
       _ =>
         fastArb(prefetchTrains.get, prefetcher.get.io.train, Some("prefetch_train"))
         prefetcher.get.io.req.ready := Cat(prefetchReqsReady).orR
         fastArb(prefetchResps.get, prefetcher.get.io.resp, Some("prefetch_resp"))
+        prefetchEvicts match {
+          case Some(evict_wire) => 
+          fastArb(evict_wire, prefetcher.get.io.evict.get, Some("prefetch_evict"))
+          case None =>
+        }
     }
+
     pf_recv_node match {
       case Some(x) =>
         prefetcher.get.io.recv_addr.valid := x.in.head._1.addr_valid
@@ -286,6 +314,15 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
         prefetcher.foreach(_.io_l2_pf_en := false.B)
     }
 
+
+    spp_send_node match{
+      case Some(sender) =>
+        sender.out.head._1.addr       := prefetcher.get.io.hint2llc.get.bits.addr
+        sender.out.head._1.addr_valid := prefetcher.get.io.hint2llc.get.valid
+        sender.out.head._1.needT      := prefetcher.get.io.hint2llc.get.bits.needT
+        sender.out.head._1.source     := prefetcher.get.io.hint2llc.get.bits.source
+      case None =>
+    }
     def restoreAddress(x: UInt, idx: Int) = {
       restoreAddressUInt(x, idx.U)
     }
@@ -302,6 +339,12 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
       if(bankBits == 0) true.B else set(bankBits - 1, 0) === bankId.U
     }
 
+    spp_send_node match{
+      case Some(x) =>
+       XSPerfAccumulate(cacheParams, "L2_sender_sended", x.out.head._1.addr_valid)
+      case None =>
+    }
+  
     val slices = node.in.zip(node.out).zipWithIndex.map {
       case (((in, edgeIn), (out, edgeOut)), i) =>
         require(in.params.dataBits == out.params.dataBits)
@@ -323,6 +366,10 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
 
         slice.io.prefetch.zip(prefetcher).foreach {
           case (s, p) =>
+            s.hint2llc match{
+              case Some(x) => x := DontCare
+              case _ => None
+            }
             s.req.valid := p.io.req.valid && bank_eq(p.io.req.bits.set, i, bankBits)
             s.req.bits := p.io.req.bits
             prefetchReqsReady(i) := s.req.ready && bank_eq(p.io.req.bits.set, i, bankBits)
@@ -330,6 +377,20 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
             val resp = Pipeline(s.resp)
             prefetchTrains.get(i) <> train
             prefetchResps.get(i) <> resp
+            prefetchEvicts match {
+                  case Some(evict_wire) => 
+                  val s_evict = Pipeline(s.evict.get)
+                  evict_wire(i) <> s_evict
+                  if(bankBits != 0){
+                    val evict_full_addr = Cat(
+                      s_evict.bits.tag, s_evict.bits.set, i.U(bankBits.W), 0.U(offsetBits.W)
+                    )
+                    val (evict_tag, evict_set, _) = s.parseFullAddress(evict_full_addr)
+                    evict_wire(i).bits.tag := evict_tag
+                    evict_wire(i).bits.set := evict_set
+                  }
+                  case None =>
+                }
             // restore to full address
             if(bankBits != 0){
               val train_full_addr = Cat(
@@ -344,6 +405,17 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
               prefetchTrains.get(i).bits.set := train_set
               prefetchResps.get(i).bits.tag := resp_tag
               prefetchResps.get(i).bits.set := resp_set
+              // prefetchEvicts match {
+              //   case Some(evict_wire) => 
+              //     val s_evict = Pipeline(s.evict.get)
+              //     val evict_full_addr = Cat(
+              //       s_evict.bits.tag, s_evict.bits.set, i.U(bankBits.W), 0.U(offsetBits.W)
+              //     )
+              //     val (evict_tag, evict_set, _) = s.parseFullAddress(evict_full_addr)
+              //     evict_wire(i).bits.tag := evict_tag
+              //     evict_wire(i).bits.set := evict_set
+              //   case None =>
+              // }
             }
         }
 

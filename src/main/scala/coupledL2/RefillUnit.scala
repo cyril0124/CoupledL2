@@ -22,6 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import chipsalliance.rocketchip.config.Parameters
+import huancun.DirtyKey
 
 class grantAckQEntry(implicit p: Parameters) extends L2Bundle {
   val source = UInt(sourceIdBits.W)
@@ -65,7 +66,7 @@ class RefillUnit(implicit p: Parameters) extends L2Module {
   io.resp.respInfo.opcode := io.sinkD.bits.opcode
   io.resp.respInfo.param := io.sinkD.bits.param
   io.resp.respInfo.last := last
-  io.resp.respInfo.dirty := io.sinkD.bits.echo.lift(DirtyKey).getOrElse(false.B)
+  io.resp.respInfo.dirty := io.sinkD.bits.echo.lift(huancun.DirtyKey).getOrElse(false.B)
   io.resp.respInfo.isHit := io.sinkD.bits.user.lift(IsHitKey).getOrElse(true.B)
   dontTouch(io.resp.respInfo.isHit)
 

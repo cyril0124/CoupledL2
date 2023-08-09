@@ -23,7 +23,7 @@ import utility._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import chipsalliance.rocketchip.config.Parameters
-import huancun.{PreferCacheKey, DirtyKey}
+import huancun.{DirtyField}
 
 class AcquireUnit(implicit p: Parameters) extends L2Module {
   val io = IO(new Bundle() {
@@ -82,7 +82,7 @@ class AcquireUnit(implicit p: Parameters) extends L2Module {
   a_acquire.bits.mask := Fill(edgeOut.manager.beatBytes, 1.U(1.W))
   a_acquire.bits.data := 0.U((edgeOut.manager.beatBytes * 8).W)
   a_acquire.bits.echo.lift(huancun.DirtyKey).foreach(_ := true.B)
-  a_acquire.bits.user.lift(PreferCacheKey).foreach(_ := false.B)
+  // a_acquire.bits.user.lift(PreferCacheKey).foreach(_ := false.B)
   a_acquire.bits.user.lift(utility.ReqSourceKey).foreach(_ := task.reqSource)
   a_acquire.bits.corrupt := false.B
 
@@ -93,7 +93,7 @@ class AcquireUnit(implicit p: Parameters) extends L2Module {
   a_put.bits.source := s1_task.source
   a_put.bits.address := Cat(s1_task.tag, s1_task.set, s1_task.off)
   a_put.bits.echo.lift(huancun.DirtyKey).foreach(_ := true.B)
-  a_put.bits.user.lift(PreferCacheKey).foreach(_ := false.B)
+  // a_put.bits.user.lift(PreferCacheKey).foreach(_ := false.B)
   a_put.bits.user.lift(utility.ReqSourceKey).foreach(_ := MemReqSource.NoWhere.id.U) //Ignore: where does Put comes from
   a_put.bits.mask := s1_pb_latch.mask
   a_put.bits.data := s1_pb_latch.data.data

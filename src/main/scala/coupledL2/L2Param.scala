@@ -47,7 +47,7 @@ case class L1Param
 }
 
 // Indicate alias bit of upper level cache
-case object AliasKey extends ControlKey[UInt]("alias")
+case object AliasKey extends ControlKey[UInt]("cpl2alias")
 case class AliasField(width: Int) extends BundleField(AliasKey) {
   override def data: UInt = Output(UInt(width.W))
   override def default(x: UInt): Unit = {
@@ -56,7 +56,7 @@ case class AliasField(width: Int) extends BundleField(AliasKey) {
 }
 
 // Indicate whether Hint is needed by upper level cache
-case object PrefetchKey extends ControlKey[Bool](name = "needHint")
+case object PrefetchKey extends ControlKey[Bool](name = "cpl2needHint")
 case class PrefetchField() extends BundleField(PrefetchKey) {
   override def data: Bool = Output(Bool())
   override def default(x: Bool): Unit = {
@@ -76,7 +76,7 @@ case class IsHitField() extends BundleField(IsHitKey) {
 
 // Indicate whether this block is dirty or not (only used in handle Release/ReleaseData)
 // Now it only works for non-inclusive cache (ignored in inclusive cache)
-case object DirtyKey extends ControlKey[Bool](name = "blockisdirty")
+case object DirtyKey extends ControlKey[Bool](name = "cpl2blockisdirty")
 
 case class DirtyField() extends BundleField(DirtyKey) {
   override def data: Bool = Output(Bool())
@@ -126,6 +126,8 @@ case class L2Param
   hartIds: Seq[Int] = Seq[Int](),
   // Prefetch
   prefetch: Option[PrefetchParameters] = None,
+  // Signature Path Prefetch multi-level cache refill support option
+  sppMultiLevelRefill : Option[PrefetchParameters] = None,
   // Performance analysis
   enablePerf: Boolean = true,
   // Monitor
