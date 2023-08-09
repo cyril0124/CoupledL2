@@ -27,7 +27,7 @@ import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._
 import coupledL2.utils._
 import coupledL2.debug._
-import coupledL2.prefetch.{PrefetchTrain, HyperPrefetchParams, PrefetchEvict, AccessState}
+import coupledL2.prefetch.PrefetchTrain
 
 class MainPipe(implicit p: Parameters) extends L2Module {
   val io = IO(new Bundle() {
@@ -100,10 +100,7 @@ class MainPipe(implicit p: Parameters) extends L2Module {
     val globalCounter = Input(UInt(log2Ceil(mshrsAll).W))
     /* send prefetchTrain to Prefetch to trigger a prefetch req */
     val prefetchTrain = prefetchOpt.map(_ => DecoupledIO(new PrefetchTrain))
-    val prefetchEvict = prefetchOpt.get match {
-      case hyper: HyperPrefetchParams => Some(DecoupledIO(new PrefetchEvict))
-      case _ => None
-    }
+
     val toMonitor = Output(new MainpipeMoni())
   })
 
@@ -189,8 +186,6 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   // For channel C reqs, Release will always hit on MainPipe, no need for MSHR
   val need_mshr_s3 = need_mshr_s3_a || need_mshr_s3_b
 
-  // // For evict address
-  // val need_evict = acquire_on_miss_s3 && (!dirResult_s3.hit ) && meta_s3.state =/= INVALID
   /* Signals to MSHR Ctl */
   // Allocation of MSHR: new request only
   val alloc_state = WireInit(0.U.asTypeOf(new FSMState()))
@@ -350,8 +345,7 @@ class MainPipe(implicit p: Parameters) extends L2Module {
     Mux(req_needT_s3 || sink_resp_s3_a_promoteT, TRUNK, meta_s3.state),
     Fill(clientBits, true.B),
     Some(metaW_s3_a_alias),
-    accessed = true.B,
-    prefetch = Mux(meta_s3.prefetch.get && dirResult_s3.hit, false.B, meta_s3.prefetch.get)
+    accessed = true.B
   )
   val metaW_s3_b = Mux(req_s3.param === toN, MetaEntry(),
     MetaEntry(false.B, BRANCH, meta_s3.clients, meta_s3.alias, accessed = meta_s3.accessed))
@@ -419,22 +413,12 @@ class MainPipe(implicit p: Parameters) extends L2Module {
 
   io.prefetchTrain.foreach {
     train =>
-      train.valid := task_s3.valid && (req_acquire_s3 || req_get_s3) && req_s3.needHint.getOrElse(false.B)
+      train.valid := task_s3.valid && (req_acquire_s3 || req_get_s3) && req_s3.needHint.getOrElse(false.B) &&
+        (!dirResult_s3.hit || meta_s3.prefetch.get)
       train.bits.tag := req_s3.tag
       train.bits.set := req_s3.set
       train.bits.needT := req_needT_s3
       train.bits.source := req_s3.sourceId
-      train.bits.state:= Mux(!dirResult_s3.hit, AccessState.MISS,
-                       Mux(!meta_s3.prefetch.get, AccessState.HIT,
-                          AccessState.PREFETCH_HIT))
-  }
-  io.prefetchEvict match {
-    case Some(evict) =>
-      evict.bits.tag := ms_task.tag
-      evict.bits.set := ms_task.set
-      evict.bits.is_prefetch := meta_s3.prefetch.get
-      evict.valid := a_need_replacement
-    case None => 
   }
 
   /* ======== Stage 4 ======== */

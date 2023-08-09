@@ -22,7 +22,6 @@ import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
 
 import freechips.rocketchip.tilelink.TLPermissions._
-import coupledL2.prefetch.PrefetchBundle
 
 abstract class L2Module(implicit val p: Parameters) extends MultiIOModule with HasCoupledL2Parameters
 abstract class L2Bundle(implicit val p: Parameters) extends Bundle with HasCoupledL2Parameters
@@ -178,7 +177,7 @@ class FSMState(implicit p: Parameters) extends L2Bundle {
   // val s_grantack = Bool() // respond grantack downwards
   // val s_writeback = Bool()// writeback tag/dir
   // val s_triggerprefetch = prefetchOpt.map(_ => Bool())
-  val s_prefetchevict = prefetchOpt.map(_ => Bool())
+
   // wait
   val w_rprobeackfirst = Bool()
   val w_rprobeacklast = Bool()
@@ -245,13 +244,6 @@ class PrefetchRecv extends Bundle {
   val addr = UInt(64.W)
   val addr_valid = Bool()
   val l2_pf_en = Bool()
-}
-
-class LlcPrefetchRecv extends Bundle{
-  val source = UInt(8.W)
-  val needT = Bool()
-  val addr = UInt(64.W)
-  val addr_valid = Bool()
 }
 
 // custom l2 - l1 interface
