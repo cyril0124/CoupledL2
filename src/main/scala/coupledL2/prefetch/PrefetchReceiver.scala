@@ -39,16 +39,13 @@ class PrefetchReceiver()(implicit p: Parameters) extends PrefetchModule {
   // just ignore train reqs
   io.train.ready := true.B
   io.resp.ready := true.B
-  io.hint2llc match{
-    case Some(x) => x := DontCare
-    case _ => None
-  }
   io.req.bits.tag := parseFullAddress(io.recv_addr.bits)._1
   io.req.bits.set := parseFullAddress(io.recv_addr.bits)._2
   io.req.bits.needT := false.B
   io.req.bits.isBOP := false.B
   io.req.bits.source := 0.U // TODO: ensure source 0 is dcache
   io.req.valid := io.recv_addr.valid
+  io.req.bits.hint2llc.foreach{_ := false.B}
 
 }
 

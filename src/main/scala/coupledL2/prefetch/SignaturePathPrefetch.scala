@@ -409,7 +409,6 @@ class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
     val train = Flipped(DecoupledIO(new PrefetchTrain)) //from higher level cache
     val req = DecoupledIO(new PrefetchReq) //issue to next-level cache
     val resp = Flipped(DecoupledIO(new PrefetchResp)) //fill request from the next-level cache, using this to update filter
-    val hint2llc = Output(Bool())
     val db_degree = Flipped(ValidIO(UInt(2.W)))
     val queue_used = Input(UInt(6.W))
   })
@@ -450,7 +449,7 @@ class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
   io.req.valid := unpack.io.resp.valid
   // io.req.valid := unpack.io.resp.valid && !send2Llc
   // io.hint2llc := unpack.io.resp.valid && send2Llc
-  io.hint2llc := false.B
+  io.req.bits.hint2llc.foreach{_  := true.B} // temp always true
 
   io.resp.ready := true.B
   XSPerfAccumulate(cacheParams, "recv_train", io.train.fire())

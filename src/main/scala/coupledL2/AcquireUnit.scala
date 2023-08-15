@@ -98,6 +98,8 @@ class AcquireUnit(implicit p: Parameters) extends L2Module {
   a_put.bits.data := s1_pb_latch.data.data
   a_put.bits.corrupt := false.B
 
+
+  
   TLArbiter.lowest(edgeOut, a_out, a_put, a_acquire)
   io.sourceA <> a_out
   io.sourceA.valid := a_out.valid && !(a_acquire.valid && !a_put.valid && busy)

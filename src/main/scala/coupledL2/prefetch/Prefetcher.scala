@@ -40,6 +40,7 @@ class PrefetchReq(implicit p: Parameters) extends PrefetchBundle {
   val needT = Bool()
   val source = UInt(sourceIdBits.W)
   val isBOP = Bool()
+  val hint2llc = if(sppMultiLevelRefillOpt.nonEmpty) Some(Bool()) else None
   def addr = Cat(tag, set, 0.U(offsetBits.W))
 }
 
@@ -80,7 +81,6 @@ class PrefetchIO(implicit p: Parameters) extends PrefetchBundle {
     case hyper: HyperPrefetchParams => Some(Flipped(DecoupledIO(new PrefetchEvict)))
     case _ => None
   }
-  val hint2llc = if(sppMultiLevelRefillOpt.nonEmpty)  Some(ValidIO(new PrefetchReq)) else None
 }
 
 class PrefetchQueue(implicit p: Parameters) extends PrefetchModule {
@@ -179,21 +179,16 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
       pftQueue.io.enq <> pft.io.req
       pipe.io.in <> pftQueue.io.deq
       io.req <> pipe.io.out
-      io.hint2llc match{
-      case Some(sender) =>
-        println(s"${cacheParams.name} Prefetch Config: SPP + SPP cross-level refill")
-        pftQueue.io.enq.valid := pft.io.req.valid && (!pft.io.hint2llc)
-        pftQueue.io.enq.bits <> pft.io.req.bits
-        pipe.io.in <> pftQueue.io.deq
-        io.req <> pipe.io.out
-        sender.valid := pft.io.hint2llc
-        sender.bits := pft.io.req.bits
-      case _ =>
-        println(s"${cacheParams.name} Prefetch Config: SPP")
-        pftQueue.io.enq <> pft.io.req
-        pipe.io.in <> pftQueue.io.deq
-        io.req <> pipe.io.out
-    }
+      // has spp multi-level cache option
+      if (io.req.bits.hint2llc.nonEmpty){
+        println(s"${cacheParams.name} Prefetch Config: BOP + SMS receiver + SPP + SPP cross-level refill")
+      }else{
+        println(s"${cacheParams.name} Prefetch Config: BOP + SMS receiver + SPP + SPP")
+      }
+      pftQueue.io.enq <> pft.io.req
+      pipe.io.in <> pftQueue.io.deq
+      io.req <> pipe.io.out
+
     case bop: BOPParameters => // case bop only
       println(s"${cacheParams.name} Prefetch Config: BOP")
       val pft = Module(new BestOffsetPrefetch)
@@ -251,11 +246,10 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
         hybrid_pfts.io.evict := DontCare
       }
       // has spp multi-level cache option
-      io.hint2llc match{
-        case Some(sender) =>
-          println(s"${cacheParams.name} Prefetch Config: BOP + SMS receiver + SPP + SPP cross-level refill")
-          sender <> hybrid_pfts.io.hint2llc
-        case _ => println(s"${cacheParams.name} Prefetch Config: BOP + SMS receiver + SPP")
+      if (io.req.bits.hint2llc.nonEmpty){
+        println(s"${cacheParams.name} Prefetch Config: BOP + SMS receiver + SPP + SPP cross-level refill")
+      }else{
+        println(s"${cacheParams.name} Prefetch Config: BOP + SMS receiver + SPP + SPP")
       }
       hybrid_pfts.io.queue_used := pftQueue.io.used
       hybrid_pfts.io.db_degree.valid := counterWrap

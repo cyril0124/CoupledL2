@@ -40,8 +40,6 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
     val resp = DecoupledIO(new PrefetchReq)
     val evict = Flipped(DecoupledIO(new PrefetchEvict))
     val from_bop = Input(Bool())
-    val spp2llc = Input(Bool())
-    val hint2llc = ValidIO(new PrefetchReq)
   })
 
   def idx(addr:      UInt) = addr(log2Up(fTableEntries) - 1, 0)
@@ -68,9 +66,6 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
   val hitForMap = hit && readResult.bitMap(blkOffset)
   io.resp.valid := io.req.fire() && (!hitForMap || io.from_bop)
   io.resp.bits := io.req.bits
-
-  io.hint2llc.valid := io.req.fire && !hitForMap && io.spp2llc
-  io.hint2llc.bits := io.req.bits
   val wData = Wire(fTableEntry())
   val newBitMap = readResult.bitMap.zipWithIndex.map{ case (b, i) => Mux(i.asUInt === blkOffset, true.B, false.B) }
   
@@ -85,7 +80,7 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
     }
   }
 
-  q.io.enq.valid := io.req.fire && !hitForMap && !io.spp2llc // if spp2llc , don't enq
+  q.io.enq.valid := io.req.fire && !hitForMap
   q.io.enq.bits := io.req.bits.addr
   q.io.deq.ready := q.io.full && q.io.enq.fire
 
@@ -151,14 +146,9 @@ class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module {
   val sms_req = q_sms.io.deq.bits
 
   val q_spp = Module(new ReplaceableQueueV2(chiselTypeOf(spp.io.req.bits), pTableQueueEntries))
-  val q_spp_hint2llc = Module(new ReplaceableQueueV2(Bool(), pTableQueueEntries))
   q_spp.io.enq <> spp.io.req
   q_spp.io.deq.ready := !q_sms.io.deq.fire && !bop.io.req.valid
-  q_spp_hint2llc.io.enq.valid := spp.io.req.valid
-  q_spp_hint2llc.io.enq.bits := spp.io.hint2llc
-  q_spp_hint2llc.io.deq.ready := !q_sms.io.deq.fire && !bop.io.req.valid
   val spp_req = q_spp.io.deq.bits
-  val spp_hint2llc = q_spp_hint2llc.io.deq.bits
 
   spp.io.train.valid := io.train.valid
   spp.io.train.bits := io.train.bits
@@ -193,11 +183,7 @@ class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module {
   fTable.io.req.valid := q_spp.io.deq.fire || q_sms.io.deq.fire || bop.io.req.valid
   fTable.io.req.bits := Mux(bop.io.req.valid, bop.io.req.bits, 
                           Mux(q_sms.io.deq.fire, sms_req, spp_req))
-  fTable.io.spp2llc := Mux(bop.io.req.valid, false.B, 
-                          Mux(q_sms.io.deq.fire, false.B, spp_hint2llc)) 
   io.req <> fTable.io.resp
-  io.hint2llc := fTable.io.hint2llc
-  dontTouch(io.hint2llc)
   fTable.io.evict.valid := io.evict.valid
   fTable.io.evict.bits := io.evict.bits
   io.evict.ready := fTable.io.evict.ready
