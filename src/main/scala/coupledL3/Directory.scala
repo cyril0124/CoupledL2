@@ -101,6 +101,10 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
     val tagWReq = Flipped(DecoupledIO(new TagWrite))
   })
 
+  println(s"selfInfo:\n" +
+        s"\tsets:${cacheParams.sets}\tways:${cacheParams.ways}\tblockBytes:${cacheParams.blockBytes}\n" +
+        s"\tset_bits:${setBits}\ttag_bits:${tagBits}\tmeta_btis:${(new MetaEntry).getWidth}")
+
   def invalid_way_sel(metaVec: Seq[MetaEntry], repl: UInt) = {
     val invalid_vec = metaVec.map(_.state === MetaData.INVALID)
     val has_invalid_way = Cat(invalid_vec).orR

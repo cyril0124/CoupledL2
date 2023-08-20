@@ -135,7 +135,7 @@ class CohChecker(implicit p: Parameters) extends L3Module {
   // When replacing a block in data array, it is not always necessary to send Release,
   // but only when state perm > clientStates' perm or replacing a dirty block
   val replaceNeedRelease = meta.state > replaceClientsState ||
-                            meta.dirty && meta.state === TIP
+                            meta.dirty && (meta.state === TIP || meta.state === BRANCH)
   aNeedReplacement := req.fromA && !dirResult.hit && meta.state =/= INVALID && replaceNeedRelease // && (req_acquireBlock_s3 && !reqNeedT || transmitFromOtherClient)
 
   cacheAlias := false.B

@@ -45,7 +45,7 @@ class RefillUnit(implicit p: Parameters) extends L3Module {
 
   val grantAckQ = Module(new Queue(new grantAckQEntry, entries=mshrsAll, pipe=false, flow=false))
 
-  grantAckQ.io.enq.valid := isGrant && io.sinkD.valid && first
+  grantAckQ.io.enq.valid := isGrant && io.sinkD.fire && first
   grantAckQ.io.enq.bits.source := io.sinkD.bits.source
   grantAckQ.io.enq.bits.sink := io.sinkD.bits.sink
 
@@ -59,7 +59,7 @@ class RefillUnit(implicit p: Parameters) extends L3Module {
   io.refillBufWrite.bits.id := io.sinkD.bits.source
   io.refillBufWrite.bits.corrupt := io.sinkD.bits.corrupt
 
-  io.resp.valid := (first || last) && io.sinkD.valid
+  io.resp.valid := (first || last) && io.sinkD.fire
   io.resp.mshrId := io.sinkD.bits.source
   io.resp.set := DontCare
   io.resp.tag := DontCare
@@ -69,5 +69,5 @@ class RefillUnit(implicit p: Parameters) extends L3Module {
   io.resp.respInfo.last := last
   io.resp.respInfo.dirty := io.sinkD.bits.echo.lift(DirtyKey).getOrElse(false.B)
 
-  io.sinkD.ready := true.B
+  io.sinkD.ready := !(hasData && !io.refillBufWrite.ready)
 }

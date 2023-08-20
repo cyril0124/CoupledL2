@@ -80,14 +80,15 @@ case class L3Param
   name: String = "L3",
   ways: Int = 4,
   sets: Int = 128,
-  dirNBanks: Int = 8,
-  dsNBanks: Int = 8,
+  dirNBanks: Int = 4,
+  dsNBanks: Int = 4,
   blockBytes: Int = 64,
   pageBytes: Int = 4096,
   channelBytes: TLChannelBeatBytes = TLChannelBeatBytes(32),
   clientCaches: Seq[CacheParameters] = Nil,
   replacement: String = "plru",
   mshrs: Int = 16,
+  grantQueueEntries: Int = 8,
   enableClockGate: Boolean = true,
   dataEccCode: Option[String] = Some("secded"), // Option: "none", "identity", "parity", "sec", "secded"
   
@@ -115,7 +116,8 @@ case class L3Param
   innerBuf: TLBufferParams = TLBufferParams(),
   outerBuf: TLBufferParams = TLBufferParams(
     a = BufferParams.default,
-    b = BufferParams.default,
+    // b = BufferParams.default,
+    b = BufferParams.none,
     c = BufferParams.none,
     d = BufferParams.default,
     e = BufferParams.default

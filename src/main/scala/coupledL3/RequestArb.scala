@@ -52,8 +52,7 @@ class RequestArb(implicit p: Parameters) extends L3Module {
     val taskToPipe_s2 = DecoupledIO(new TaskBundle())
 
     // send mshrBuf read request
-    val refillBufRead_s2 = DecoupledIO(new MSHRBufReadReq)
-    val releaseBufRead_s2 = DecoupledIO(new MSHRBufReadReq)
+    val mshrBufRead_s2 = DecoupledIO(new MSHRBufReadReq)
 
     // send lookupBuf read request for PutPartialData
     val putDataBufRead_s2 = Flipped(new LookupBufRead)
@@ -106,8 +105,7 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   // --------------------------------------------------------------------------
   //  Stage0: 
   // --------------------------------------------------------------------------
-  // io.mshrTask.ready  := !io.fromGrantBuffer.blockMSHRReqEntrance
-  io.mshrTask.ready  := !io.fromGrantBuffer.blockMSHRReqEntrance && s0_ready
+  io.mshrTask.ready  := s0_ready
   val mshr_task_s0    = Wire(Valid(new TaskBundle()))
   mshr_task_s0.valid := io.mshrTask.fire()
   mshr_task_s0.bits  := io.mshrTask.bits
@@ -140,10 +138,6 @@ class RequestArb(implicit p: Parameters) extends L3Module {
 
   // latch mshr_task from s0 to s1
   val mshrTask_s1 = RegInit(0.U.asTypeOf(Valid(new TaskBundle())))
-  // mshrTask_s1.valid := mshr_task_s0.valid
-  // when(mshr_task_s0.valid) {
-  //   mshrTask_s1.bits := mshr_task_s0.bits
-  // }
 
   // Channel interaction from s1
   val taskSinkA           = io.sinkA.bits
@@ -217,7 +211,7 @@ class RequestArb(implicit p: Parameters) extends L3Module {
 
   val dirReady = io.dirRead_s1.ready && io.clientDirRead_s1.ready
   s1_valid := mshrTask_s1.valid || chnlTask_s1.valid && dirReady
-  s1_ready := !s1_full || s1_fire
+  s1_ready := (!s1_full || s1_fire) && !io.fromGrantBuffer.blockMSHRReqEntrance
   s1_fire := s1_valid && s2_ready 
 
   when(s0_fire) {
@@ -237,16 +231,16 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   //  Stage2: 
   // --------------------------------------------------------------------------
   val task_s2 = RegInit(0.U.asTypeOf(task_s1))
-  // task_s2.valid := task_s1.valid
-  // when(task_s1.valid) { task_s2.bits := task_s1.bits }
   
-  // io.taskToPipe_s2 := task_s2
   io.taskToPipe_s2.valid := task_s2.valid
   io.taskToPipe_s2.bits := task_s2.bits
 
   val willReadRefillBuf = WireInit(false.B)
   val willReadReleaseBuf = WireInit(false.B)
-  s2_valid := s2_full // && !(willReadReleaseBuf && !io.releaseBufRead_s2.ready) && !(willReadRefillBuf && !io.refillBufRead_s2.ready)
+  val willReadMSHRBuf = WireInit(false.B)
+  s2_valid := s2_full && (
+    !(willReadMSHRBuf && !io.mshrBufRead_s2.ready)
+  )
   s2_ready := !s2_full || s2_fire
   when(s1_fire) {
     s2_full := true.B
@@ -280,20 +274,16 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   // Caution: GrantData-alias may read DataStorage or ReleaseBuf instead
   val selfHasData = task_s2.bits.selfHasData
   
-  willReadRefillBuf := mshrTask_s2 && !task_s2.bits.useProbeData && mshrTask_s2_a_upwards && !selfHasData
-  io.refillBufRead_s2.valid := willReadRefillBuf && s2_fire
-  io.refillBufRead_s2.bits.id    := task_s2.bits.mshrId
-  // For ReleaseData or ProbeAckData, read releaseBuffer
-  // channel is used to differentiate GrantData and ProbeAckData
-  willReadReleaseBuf := mshrTask_s2 && (
-    task_s2.bits.opcode === ReleaseData ||
-    task_s2.bits.fromB && task_s2.bits.opcode === ProbeAckData || 
-    task_s2.bits.fromA && task_s2.bits.useProbeData && mshrTask_s2_a_upwards && !selfHasData
+  willReadMSHRBuf := !selfHasData && mshrTask_s2 && (
+    mshrTask_s2_a_upwards ||  
+    (
+      task_s2.bits.opcode === ReleaseData ||
+      task_s2.bits.fromB && task_s2.bits.opcode === ProbeAckData || 
+      task_s2.bits.fromA && task_s2.bits.useProbeData && mshrTask_s2_a_upwards && !selfHasData
+    )
   )
-  io.releaseBufRead_s2.valid := willReadReleaseBuf && s2_fire
-  io.releaseBufRead_s2.bits.id := task_s2.bits.mshrId
-   assert(!io.refillBufRead_s2.valid || io.refillBufRead_s2.ready)
-   assert(!io.releaseBufRead_s2.valid || io.releaseBufRead_s2.ready)
+  io.mshrBufRead_s2.valid := willReadMSHRBuf
+  io.mshrBufRead_s2.bits.id := task_s2.bits.mshrId
 
   // For PutPartialData, read putDataBuffer
   io.putDataBufRead_s2.valid := mshrTask_s2 && task_s2.bits.opcode === PutPartialData && task_s2.bits.fromA && task_s2.bits.putHit && task_s2.bits.opcodeIsReq && s2_fire

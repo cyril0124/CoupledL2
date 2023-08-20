@@ -66,8 +66,8 @@ class MSHRCtl(implicit p: Parameters) extends L3Module {
     /* send reqs */
     val sourceA = DecoupledIO(new TLBundleA(edgeOut.bundle))
     val sourceB = DecoupledIO(new TLBundleB(edgeIn.bundle))
-    // val prefetchTrain = prefetchOpt.map(_ => DecoupledIO(new PrefetchTrain))
-    val grantStatus = Input(Vec(sourceIdAll, new GrantStatus))
+    val grantStatus = Input(Vec(grantQueueEntries, new GrantStatus))
+
 
     /* receive resps */
     val resps = Input(new Bundle() {
@@ -190,7 +190,7 @@ class MSHRCtl(implicit p: Parameters) extends L3Module {
   val setMatchVec_c = mshrs.map(m => m.io.status.valid && m.io.status.bits.set === io.fromReqArb.status_s1.c_set)
   val setConflictVec_c = (setMatchVec_c zip mshrs.map(_.io.status.bits.nestC)).map(x => x._1 && !x._2)
   io.toReqArb.blockC_s1 := mshrFull || Cat(setConflictVec_c).orR || !hasEmptyWay
-  io.toReqArb.blockB_s1 := b_mshrFull || Cat(setConflictVec_b_1).orR
+  io.toReqArb.blockB_s1 := b_mshrFull || Cat(setConflictVec_b).orR
   io.toReqArb.blockA_s1 := a_mshrFull // conflict logic moved to ReqBuf
 
   /* Acquire downwards */

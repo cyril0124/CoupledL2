@@ -165,7 +165,7 @@ class SinkC(implicit p: Parameters) extends L3Module {
   io.toReqArb.bits.wayMask := ~occWay
 
   io.resp := DontCare
-  io.resp.valid := io.c.valid && (first || last) && !isRelease
+  io.resp.valid := io.c.fire && (first || last) && !isRelease
   io.resp.mshrId := 0.U // DontCare
   io.resp.tag := parseAddress(io.c.bits.address)._1
   io.resp.set := parseAddress(io.c.bits.address)._2
@@ -184,9 +184,9 @@ class SinkC(implicit p: Parameters) extends L3Module {
   // io.c.ready := !isRelease || !first || !full || !hasData && io.toReqArb.ready
   io.c.ready := !(isRelease && first && full && (hasData || !io.toReqArb.ready)) && !(isProbeAck && hasData && !io.releaseBufWrite.ready)
 
-  when(io.c.valid && isProbeAck && hasData && !io.releaseBufWrite.ready) {
-    printf(s"ProbeAckData want to write releaseBuf and releaseBuf is not ready! address: ${io.c.bits.address} source: ${io.c.bits.source}")
-  }
+  // when(RegNext(io.c.valid && isProbeAck && hasData && !io.releaseBufWrite.ready)) {
+  //   printf(p"ProbeAckData want to write releaseBuf and releaseBuf is not ready! address: ${io.c.bits.address} source: ${io.c.bits.source}")
+  // }
 
   io.bufResp.data := dataBuf(io.bufRead.bits.bufIdx)
 

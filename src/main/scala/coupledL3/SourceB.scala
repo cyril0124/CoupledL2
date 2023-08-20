@@ -44,7 +44,7 @@ class SourceB(implicit p: Parameters) extends L3Module {
   val io = IO(new Bundle() {
     val sourceB = DecoupledIO(new TLBundleB(edgeIn.bundle))
     val task = Flipped(DecoupledIO(new SourceBReq))
-    val grantStatus = Input(Vec(sourceIdAll, new GrantStatus))
+    val grantStatus = Input(Vec(grantQueueEntries, new GrantStatus))
   })
 
   def toTLBundleB(task: SourceBReq) = {

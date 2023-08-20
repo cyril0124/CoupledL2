@@ -38,7 +38,7 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   })
 
   val reqArb = Module(new RequestArb())
-  val a_reqBuf = Module(new RequestBuffer_1)
+  val a_reqBuf = Module(new RequestBuffer)
   val mainPipe = Module(new MainPipe())
   val mshrCtl = Module(new MSHRCtl())
   val directory = Module(new Directory())
@@ -47,10 +47,21 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   val sinkA = Module(new SinkA)
   val sinkC = Module(new SinkC)
   val sourceC = Module(new SourceC)
-  val grantBuf = if (!useFIFOGrantBuffer) Module(new GrantBuffer) else Module(new GrantBufferFIFO)
-  val refillBuf = Module(new MSHRBuffer(wPorts = 2))
-  val releaseBuf = Module(new MSHRBuffer(wPorts = 3))
+  val grantBuf = Module(new GrantBuffer)
   val putDataBuf = Module(new LookupBuffer(entries = lookupBufEntries))
+
+  val mshrBuf = Module(new MSHRBuffer())
+  val mshrBufWrArb = Module(new Arbiter(mshrBuf.io.w.bits.cloneType, 3))
+
+  mshrBuf.io.r.req <> reqArb.io.mshrBufRead_s2
+
+  mshrBufWrArb.io.in(0) <> mainPipe.io.mshrBufWrite
+  mshrBufWrArb.io.in(1) <> sinkC.io.releaseBufWrite
+  mshrBufWrArb.io.in(1).bits.id := mshrCtl.io.releaseBufWriteId
+  mshrBufWrArb.io.in(2) <> refillUnit.io.refillBufWrite
+
+  mshrBuf.io.w <> mshrBufWrArb.io.out
+
 
   val probeHelper = Module(new ProbeHelper(entries = 5, enqDelay = 1))
   val clientDirectory = Module(new noninclusive.ClientDirectory())
@@ -84,8 +95,6 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   reqArb.io.dirRead_s1 <> directory.io.read
   reqArb.io.taskToPipe_s2 <> mainPipe.io.taskFromArb_s2
   reqArb.io.mshrTask <> mshrCtl.io.mshrTask
-  reqArb.io.refillBufRead_s2 <> refillBuf.io.r.req
-  reqArb.io.releaseBufRead_s2 <> releaseBuf.io.r.req
   reqArb.io.putDataBufRead_s2 <> DontCare
   reqArb.io.fromMSHRCtl := mshrCtl.io.toReqArb
   reqArb.io.fromMainPipe := mainPipe.io.toReqArb
@@ -116,10 +125,12 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   mainPipe.io.bufResp <> sinkC.io.bufResp
   mainPipe.io.toDS.rdata_s5 := dataStorage.io.rdata
   mainPipe.io.toDS.error_s5 := dataStorage.io.error
-  mainPipe.io.refillBufResp_s3.valid := RegNext(refillBuf.io.r.req.fire, false.B)
-  mainPipe.io.refillBufResp_s3.bits := refillBuf.io.r.resp.bits
-  mainPipe.io.releaseBufResp_s3.valid := RegNext(releaseBuf.io.r.req.fire, false.B)
-  mainPipe.io.releaseBufResp_s3.bits := releaseBuf.io.r.resp.bits
+  mainPipe.io.refillBufResp_s3.valid := RegNext(mshrBuf.io.r.req.fire, false.B)
+  mainPipe.io.refillBufResp_s3.bits := mshrBuf.io.r.resp.bits
+
+  mainPipe.io.releaseBufResp_s3.valid := RegNext(mshrBuf.io.r.req.fire, false.B)
+  mainPipe.io.releaseBufResp_s3.bits := mshrBuf.io.r.resp.bits
+
   mainPipe.io.putDataBufResp_s3.valid := RegNext(putDataBuf.io.r.valid, false.B)
   mainPipe.io.putDataBufResp_s3.bits := putDataBuf.io.r.data
   mainPipe.io.fromReqArb.status_s1 := reqArb.io.status_s1
@@ -131,23 +142,8 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   mainPipe.io.fromReqBufSinkA.set := a_reqBuf.io.out.bits.set
   
 
-
   sinkA.io.fromMainPipe.putReqGood_s3 := mainPipe.io.toSinkA.putReqGood_s3
   sinkA.io.fromPutDataBuf.full := putDataBuf.io.full
-
-
-  releaseBuf.io.w(0) <> sinkC.io.releaseBufWrite
-  releaseBuf.io.w(0).bits.id := mshrCtl.io.releaseBufWriteId // id is given by MSHRCtl by comparing address to the MSHRs (only for ProbeAckData)
-  releaseBuf.io.w(1) <> mainPipe.io.releaseBufWrite
-  releaseBuf.io.w(2).valid := mshrCtl.io.nestedwbDataId.valid
-  releaseBuf.io.w(2).bits.beat_sel := Fill(beatSize, 1.U(1.W))
-  releaseBuf.io.w(2).bits.data := mainPipe.io.nestedwbData
-  releaseBuf.io.w(2).bits.id := mshrCtl.io.nestedwbDataId.bits
-  releaseBuf.io.w(2).bits.corrupt := false.B
-
-
-  refillBuf.io.w(0) <> refillUnit.io.refillBufWrite
-  refillBuf.io.w(1) <> mainPipe.io.refillBufWrite
 
 
   putDataBuf.io <> DontCare

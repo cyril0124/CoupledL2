@@ -6,7 +6,6 @@ import chisel3._
 import chisel3.util._
 import coupledL3.utils._
 import utility._
-import chisel3.util.experimental.BoringUtils
 
 class ReqEntry(entries: Int = 4)(implicit p: Parameters) extends L3Bundle() {
   val valid    = Bool()
@@ -30,12 +29,6 @@ class ReqEntry(entries: Int = 4)(implicit p: Parameters) extends L3Bundle() {
   * (3) when MSHR is free
   * */
   val waitMS  = UInt(mshrsAll.W)
-
-  /* buffer_dep_mask[i][j] => entry i should wait entry j
-  *   this is used to make sure that same set requests will be sent
-  *   to MSHR in order
-  */
-//  val depMask = Vec(entries, Bool())
 
   /* ways in the set that are occupied by unfinished MSHR task */
   val occWays = UInt(cacheParams.ways.W)
@@ -87,11 +80,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   def sameSet (a: TaskBundle, b: TaskBundle):     Bool = a.set === b.set
   def sameSet (a: TaskBundle, b: MSHRBlockAInfo): Bool = a.set === b.set
   def addrConflict(a: TaskBundle, s: MSHRBlockAInfo): Bool = {
-    // if (cacheParams.name == "l3") {
     a.set === s.set // && (a.tag === s.reqTag || a.tag === s.metaTag && s.needRelease) // TODO: reduce set blocking for L3 ?
-    // } else {
-      // a.set === s.set && (a.tag === s.reqTag || a.tag === s.metaTag && s.needRelease)
-    // }
   }
   def conflictMask(a: TaskBundle): UInt = VecInit(io.mshrStatus.map(s =>
     s.valid && addrConflict(a, s.bits) && !s.bits.willFree)).asUInt
@@ -155,14 +144,15 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     // when Addr-Conflict / Same-Addr-Dependent / MainPipe-Block / noFreeWay-in-Set, entry not ready
     entry.rdy     := !conflict(in) && !mpBlock && !noFreeWay(in) && !s1Block // && !Cat(depMask).orR
     entry.task    := io.in.bits
+
     entry.waitMP  := Cat(
-      s1Block,
-      io.mainPipeBlock(0),
-      io.mainPipeBlock(1),
-      0.U(1.W))
+      0.U(1.W),
+      io.mainPipeBlock(0) & ~io.pipeFlow_s2 || s1Block,
+      io.mainPipeBlock(1) & ~io.pipeFlow_s3 || io.mainPipeBlock(0) & io.pipeFlow_s2,
+      io.mainPipeBlock(1) & io.pipeFlow_s3
+    )
     entry.waitMS  := conflictMask(in)
     entry.occWays := Mux(mpBlock, 0.U, occWays(in))
-
   }
 
 
@@ -193,81 +183,36 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   //TODO: if i use occWays when update,
   // does this mean that every entry has occWays logic?
 
-  val mshr_willFreeMask = VecInit(io.mshrStatus.map(ms => ms.bits.willFree && ms.valid))
-  val buffer_sameSetWithMSHR = Wire(Vec(entries, Vec(mshrsAll, Bool())))
-  buffer_sameSetWithMSHR.zip(buffer).foreach{
-    case (flag, e) =>
-      flag := io.mshrStatus.map(status => status.valid & status.bits.set === e.task.set)
-  }
-  dontTouch(buffer_sameSetWithMSHR)
-  dontTouch(mshr_willFreeMask)
-
-  val buffer_occWayUpdate = RegInit(VecInit(Seq.fill(entries)(0.U(NWay.W))))
-  buffer_occWayUpdate.zipWithIndex.foreach{
-    case (update, i) =>
-      update := buffer_sameSetWithMSHR(i).asUInt & mshr_willFreeMask(i)
-  }
-  dontTouch(buffer_occWayUpdate)
 
 
   /* ======== Update rdy and masks ======== */
   // TODO: move to io
   val pipeFlow_s1, pipeFlow_s2, pipeFlow_s3 = WireInit(false.B)
   val pipeFlow = pipeFlow_s1 || pipeFlow_s2 || pipeFlow_s3
-  // BoringUtils.addSink(pipeFlow_s1, "pipeFlow_s1")
-  // BoringUtils.addSink(pipeFlow_s2, "pipeFlow_s2")
-  // BoringUtils.addSink(pipeFlow_s3, "pipeFlow_s3")
-  // dontTouch(pipeFlow_s1)
-  // dontTouch(pipeFlow_s2)
-  // dontTouch(pipeFlow_s3)
-
   pipeFlow_s1 := io.pipeFlow_s1
   pipeFlow_s2 := io.pipeFlow_s2
   pipeFlow_s3 := io.pipeFlow_s3
 
   for (e <- buffer) {
     when(e.valid) {
+      // val waitMPUpdate  = WireInit(e.waitMP)
       val waitMSUpdate  = WireInit(e.waitMS)
       val occWaysUpdate = WireInit(e.occWays)
 
       // when mshr will_free, clear it in other reqs' waitMS and occWays
       val willFreeMask = VecInit(io.mshrStatus.map(s => s.valid && s.bits.willFree)).asUInt
-      waitMSUpdate  := e.waitMS  & (~willFreeMask).asUInt
-      
-      // if(cacheParams.name == "l3") {
+      waitMSUpdate  := e.waitMS & (~willFreeMask).asUInt
       occWaysUpdate := e.occWays & (~willFreeWays(e.task)).asUInt
-      // } else {
-      //   occWaysUpdate := e.occWays & (~willFreeWays_1(e.task)).asUInt
-      //   // occWaysUpdate := e.occWays & (~willFreeWays(e.task)).asUInt
-      // }
-
-      // Initially,
-      //    waitMP(2) = s2 blocking, wait 2 cycles
-      //    waitMP(1) = s3 blocking, wait 1 cycle
-      // Now that we shift right waitMP every cycle
-      //    so when waitMP(1) is 0 and waitMP(0) is 1, desired cycleCnt reached
-      //    we recalculate waitMS and occWays, overriding old mask
-      //    to take new allocated MSHR into account
-       if(enableHalfFreq) {
-         // TODO:
-         // e.waitMP := MuxLookup(e.waitMP, e.waitMP >> pipeFlow.asUInt, Seq(
-         //   "b1000".U -> (e.waitMP >> pipeFlow_s1.asUInt),
-         //   "b0100".U -> (e.waitMP >> pipeFlow_s2.asUInt),
-         //   "b0010".U -> (e.waitMP >> pipeFlow_s3.asUInt),
-         // ))
-         e.waitMP := MuxLookup(e.waitMP, e.waitMP >> pipeFlow.asUInt, Seq(
-           "b1000".U -> (e.waitMP >> pipeFlow_s2.asUInt),
-           "b0100".U -> (e.waitMP >> pipeFlow_s3.asUInt),
-           "b0010".U -> (e.waitMP >> pipeFlow_s3.asUInt),
-         ))
-       } else {
-         e.waitMP := e.waitMP >> 1.U
-       }
-
+      e.waitMP  := PriorityMux(Seq(
+        e.waitMP(1) -> (e.waitMP >> pipeFlow_s3.asUInt),
+        e.waitMP(2) -> (e.waitMP >> pipeFlow_s2.asUInt)
+      ))
+      
       when(e.waitMP(1) === 0.U && e.waitMP(0) === 1.U) {
         waitMSUpdate  := conflictMask(e.task)
         occWaysUpdate := occWays(e.task)
       }
+
 
       // set waitMP if fired-s1-req is the same set
       val s1A_Block = io.out.fire && sameSet(e.task, io.out.bits)
@@ -278,9 +223,10 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
       }
 
       // update info
+      // e.waitMP  := waitMPUpdate
       e.waitMS  := waitMSUpdate
       e.occWays := occWaysUpdate
-      e.rdy     := !waitMSUpdate.orR && !e.waitMP && !noFreeWay(occWaysUpdate) && !s1_Block
+      e.rdy     := !waitMSUpdate.orR && !Cat(e.waitMP(2, 1)).orR && !noFreeWay(occWaysUpdate) && !s1_Block
     }
   }
 

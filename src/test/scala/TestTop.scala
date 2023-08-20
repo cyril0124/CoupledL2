@@ -544,10 +544,11 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       name = s"l3",
       ways = 4,
       // sets = 128,
-      sets = 32,
+      // sets = 32,
+      sets = 64,
       clientCaches = Seq(CacheParameters(
-        sets = 32,
-        ways = 8,
+        sets = 64,
+        ways = 4,
         aliasBitsOpt = None,
         name = "l2",
         blockGranularity = 64

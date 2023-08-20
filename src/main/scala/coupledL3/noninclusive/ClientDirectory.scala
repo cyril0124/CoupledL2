@@ -99,8 +99,10 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
     val tagWReq = Flipped(DecoupledIO(new ClientTagWrite))
   })
 
-  println(s"clientInfo:")
-  println(s"\tclientWays: ${clientWays}\tclientWayBits:${clientWayBits}\tclientSets:${clientSets}\tclientSetBits:${clientSetBits}")
+  println(s"clientInfo:\n" +
+          s"\tclientWays:${clientWays}\tclientWayBits:${clientWayBits}\n" +
+          s"\tclientSets:${clientSets}\tclientSetBits:${clientSetBits}\n" +
+          s"\tclientTagBits:${clientTagBits}\tclientMetaBits:${(new ClientMetaEntry).getWidth}\tclientBits:${clientBits}")
 
   def client_invalid_way_fn(metaVec: Vec[Vec[ClientMetaEntry]], repl: UInt): (Bool, UInt) = {
     val invalid_vec = Cat(metaVec.map(states => Cat(states.map(_.state === INVALID)).andR).reverse)
@@ -163,6 +165,38 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
     io.metaWReq.bits.set,
     io.metaWReq.bits.wayOH
   )
+
+  // val metaArrayDiv = 8
+  // val metaArrayDivBits = log2Ceil(metaArrayDiv)
+  // val metaArray = Module(new BankedSRAM(Vec(clientBits, new ClientMetaEntry), sets / metaArrayDiv, ways * metaArrayDiv, banks / 2, singlePort = true, enableClockGate = enableClockGate))
+  // val metaReadVec = Wire(Vec(ways * metaArrayDiv, Vec(clientBits, new ClientMetaEntry)))
+  // val metaRdSet = rdSet(clientSetBits - 1, metaArrayDivBits)
+  // val metaRdWayOH = RegEnable(UIntToOH(rdSet(metaArrayDivBits -1, 0)), 0.U(metaArrayDiv.W), io.read.fire)
+  // dontTouch(metaRdSet)
+  // dontTouch(metaReadVec)
+  // dontTouch(metaRead)
+  // dontTouch(metaRdWayOH)
+  // metaReadVec := metaArray.io.r(io.read.fire, metaRdSet).resp.data
+  // metaRead := Mux1H(metaRdWayOH.asBools,
+  //   metaReadVec.asTypeOf(Vec(metaArrayDiv, Vec(ways, Vec(clientBits, new ClientMetaEntry)))
+  // ))
+
+  // val metaWrSet = io.metaWReq.bits.set(clientSetBits - 1, metaArrayDivBits)
+  // val metaWrWayOH = UIntToOH(io.metaWReq.bits.set(metaArrayDivBits - 1, 0))
+  // val metaWrWayMask = WireInit(0.U((ways * metaArrayDiv).W)).asTypeOf(Vec(metaArrayDiv, UInt(ways.W)))
+  // dontTouch(metaWrSet)
+  // dontTouch(metaWrWayOH)
+  // dontTouch(metaWrWayMask)
+  // metaWrWayMask.zip(metaWrWayOH.asBools).foreach{
+  //   case (m, en) =>
+  //     m := Mux(en, io.metaWReq.bits.wayOH, 0.U(ways.W))
+  // }
+  // metaArray.io.w(
+  //   metaWen,
+  //   io.metaWReq.bits.wmeta,
+  //   metaWrSet,
+  //   metaWrWayMask.asUInt
+  // )
 
   dontTouch(io)
   dontTouch(metaArray.io)
