@@ -135,8 +135,10 @@ class SinkA(implicit p: Parameters) extends L2Module {
   commonReq.valid := io.a.valid && first && !noSpace
   commonReq.bits := fromTLAtoTaskBundle(io.a.bits)
   if (prefetchOpt.nonEmpty) {
-    prefetchReq.get.valid := io.prefetchReq.get.valid
-    prefetchReq.get.bits := fromPrefetchReqtoTaskBundle(io.prefetchReq.get.bits)
+    val prefetchReqReg = RegEnable(io.prefetchReq.get.bits, init=0.U.asTypeOf(new PrefetchReq), enable=io.prefetchReq.get.valid)
+    val prefetchValid = RegNext(io.prefetchReq.get.valid)
+    prefetchReq.get.valid := prefetchValid
+    prefetchReq.get.bits := fromPrefetchReqtoTaskBundle(prefetchReqReg)
     io.prefetchReq.get.ready := prefetchReq.get.ready
     fastArb(Seq(commonReq, prefetchReq.get), io.toReqArb)
   } else {

@@ -23,6 +23,7 @@ import utility._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import chipsalliance.rocketchip.config.Parameters
+import coupledL2.utils.XSPerfAccumulate
 class HintBypassBundle(implicit p: Parameters) extends L2Bundle {
   val opcode = UInt(3.W) 
   val param = UInt(3.W)
@@ -125,6 +126,9 @@ class AcquireUnit(implicit p: Parameters) extends L2Module {
   a_hint2llc.bits.echo.lift(DirtyKey).foreach(_ := true.B)
   a_hint2llc.bits.user.lift(utility.ReqSourceKey).foreach(_ := a_hintDeq.bits.reqSource)
   a_hint2llc.bits.corrupt := false.B
+  val hintQcount = a_hintQueue.io.count
+  XSPerfAccumulate(cacheParams, "L2_bypass_queue_has_data", hintQcount =/= 0.U)
+  XSPerfAccumulate(cacheParams, "L2_bypass_queue_is_full", hintQcount === 16.U)
   
   TLArbiter.lowest(edgeOut, a_out, a_put, a_acquire, a_hint2llc)
   io.sourceA <> a_out
@@ -137,4 +141,9 @@ class AcquireUnit(implicit p: Parameters) extends L2Module {
   io.pbRead.bits.count := s0_count
 
   dontTouch(io)
+  XSPerfAccumulate(cacheParams, "L2_sourceA_acquire_fire", a_acquire.fire())
+  XSPerfAccumulate(cacheParams, "L2_sourceA_hint_bypass_fire", a_hint2llc.fire())
+  XSPerfAccumulate(cacheParams, "L2_sourceA_working", io.sourceA.fire())
+  XSPerfAccumulate(cacheParams, "L2_sourceA_is_free", io.sourceA.ready)
+
 }

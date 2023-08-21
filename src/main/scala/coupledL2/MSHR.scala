@@ -201,6 +201,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_release.pbIdx := 0.U(mshrBits.W)
     mp_release.fromL2pft.foreach(_ := false.B)
     mp_release.needHint.foreach(_ := false.B)
+    mp_release.needHint2llc.foreach(_ := false.B)
     mp_release.way := req.way
     mp_release.dirty := meta.dirty && meta.state =/= INVALID || probeDirty
     mp_release.metaWen := true.B
@@ -243,6 +244,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_probeack.pbIdx := 0.U(mshrBits.W)
     mp_probeack.fromL2pft.foreach(_ := false.B)
     mp_probeack.needHint.foreach(_ := false.B)
+    mp_probeack.needHint2llc.foreach(_ := false.B)
     mp_probeack.way := req.way
     mp_probeack.dirty := meta.dirty && meta.state =/= INVALID || probeDirty
     mp_probeack.meta := MetaEntry(
@@ -337,6 +339,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_grant.dsWen := !dirResult.hit && !req_put && gotGrantData || probeDirty && (req_get || req.aliasTask.getOrElse(false.B))
     mp_grant.fromL2pft.foreach(_ := req.fromL2pft.get)
     mp_grant.needHint.foreach(_ := false.B)
+    mp_grant.needHint2llc.foreach(_ := false.B)
     mp_grant.wayMask := 0.U(cacheParams.ways.W)
     mp_grant.reqSource := 0.U(MemReqSource.reqSourceBits.W)
     mp_grant

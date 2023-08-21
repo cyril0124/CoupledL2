@@ -105,6 +105,7 @@ class RequestArb(implicit p: Parameters) extends L2Module {
     task.pbIdx := 0.U(mshrBits.W)
     task.fromL2pft.foreach(_ := false.B)
     task.needHint.foreach(_ := false.B)
+    task.needHint2llc.foreach(_ := false.B)
     task.dirty := false.B
     task.way := 0.U(wayBits.W)
     task.meta := 0.U.asTypeOf(new MetaEntry)

@@ -157,7 +157,7 @@ class SinkA(implicit p: Parameters) extends L3Module {
     (io.toReqArb.bits.opcode === PutFullData || io.toReqArb.bits.opcode === PutPartialData))
   XSPerfAccumulate(cacheParams, "sinkA_put_beat", io.a.fire() &&
     (io.a.bits.opcode === PutFullData || io.a.bits.opcode === PutPartialData))
-
+  XSPerfAccumulate(cacheParams, "sinkA_hint_req", io.a.fire() && io.a.bits.opcode === Hint) 
   // cycels stalled by mainpipe
   val stall = io.toReqArb.valid && !io.toReqArb.ready
   XSPerfAccumulate(cacheParams, "sinkA_stall_by_mainpipe", stall)
