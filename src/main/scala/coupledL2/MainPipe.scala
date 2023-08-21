@@ -178,9 +178,10 @@ class MainPipe(implicit p: Parameters) extends L2Module {
     acquire_on_hit_s3,
     acquire_on_miss_s3
   )
+  val need_hint_llc_s3_a = req_s3.needHint2llc.getOrElse(false.B)
   val need_probe_s3_a = req_get_s3 && dirResult_s3.hit && meta_s3.state === TRUNK
 
-  val need_mshr_s3_a = need_acquire_s3_a || need_probe_s3_a || cache_alias || req_put_s3
+  val need_mshr_s3_a = need_acquire_s3_a || need_probe_s3_a || cache_alias || req_put_s3 && !need_hint_llc_s3_a
   // For channel B reqs, alloc mshr when Probe hits in both self and client dir
   val need_mshr_s3_b = dirResult_s3.hit && req_s3.fromB &&
     !(meta_s3.state === BRANCH && req_s3.param === toB) &&
@@ -218,6 +219,7 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   ms_task.pbIdx            := req_s3.pbIdx
   ms_task.fromL2pft.foreach(_ := req_s3.fromL2pft.get)
   ms_task.needHint.foreach(_  := req_s3.needHint.get)
+  ms_task.needHint2llc.foreach(_ := req_s3.needHint2llc.getOrElse(false.B) && need_acquire_s3_a)
   ms_task.dirty            := false.B
   ms_task.way              := dirResult_s3.way
   ms_task.meta             := 0.U.asTypeOf(new MetaEntry)

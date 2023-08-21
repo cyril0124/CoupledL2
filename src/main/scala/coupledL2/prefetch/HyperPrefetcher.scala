@@ -123,7 +123,6 @@ class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module {
     val resp = Flipped(DecoupledIO(new PrefetchResp))
     val evict = Flipped(DecoupledIO(new PrefetchEvict))
     val recv_addr = Flipped(ValidIO(UInt(64.W)))
-    val hint2llc = ValidIO(new PrefetchReq)
     val db_degree = Flipped(ValidIO(UInt(2.W)))
     val queue_used = Input(UInt(6.W))
   })

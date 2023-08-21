@@ -141,7 +141,16 @@ class MSHRCtl(implicit p: Parameters) extends L2Module {
   io.sourceA <> acquireUnit.io.sourceA
   io.pbRead <> acquireUnit.io.pbRead
   io.pbResp <> acquireUnit.io.pbResp
-
+  acquireUnit.io.hintBypass.valid := io.fromMainPipe.mshr_alloc_s3.bits.task.needHint2llc.getOrElse(false.B)
+  acquireUnit.io.hintBypass.bits.opcode  := io.fromMainPipe.mshr_alloc_s3.bits.task.opcode
+  acquireUnit.io.hintBypass.bits.param    := io.fromMainPipe.mshr_alloc_s3.bits.task.param     
+  acquireUnit.io.hintBypass.bits.size     := io.fromMainPipe.mshr_alloc_s3.bits.task.size      
+  acquireUnit.io.hintBypass.bits.sourceId := io.fromMainPipe.mshr_alloc_s3.bits.task.sourceId  
+  acquireUnit.io.hintBypass.bits.set      := io.fromMainPipe.mshr_alloc_s3.bits.task.set       
+  acquireUnit.io.hintBypass.bits.tag      := io.fromMainPipe.mshr_alloc_s3.bits.task.tag       
+  acquireUnit.io.hintBypass.bits.off      := io.fromMainPipe.mshr_alloc_s3.bits.task.off       
+  acquireUnit.io.hintBypass.bits.reqSource:= io.fromMainPipe.mshr_alloc_s3.bits.task.reqSource 
+  
   /* Probe upwards */
   val sourceB = Module(new SourceB())
   fastArb(mshrs.map(_.io.tasks.source_b), sourceB.io.task, Some("source_b"))

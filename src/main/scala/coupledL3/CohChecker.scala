@@ -174,7 +174,7 @@ class CohChecker(implicit p: Parameters) extends L3Module {
   when(req.fromA) {
     allocState.w_probehelper_done := !io.in.clientDirConflict
 
-    allocState.s_refill := reqPut && dirResult.hit // put request will not cause refill and grnatAck
+    allocState.s_refill := reqPut && dirResult.hit // put request will not cause refill and grantAck
     allocState.w_grantack := reqPrefetch || reqGet || reqPut
     allocState.s_put_wb := !reqPut
     // need replacement

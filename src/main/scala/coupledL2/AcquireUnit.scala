@@ -23,19 +23,30 @@ import utility._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import chipsalliance.rocketchip.config.Parameters
-
+class HintBypassBundle(implicit p: Parameters) extends L2Bundle {
+  val opcode = UInt(3.W) 
+  val param = UInt(3.W)
+  val size = UInt(msgSizeBits.W)
+  val sourceId = UInt(sourceIdBits.W)
+  val set = UInt(setBits.W)
+  val tag = UInt(tagBits.W)
+  val off = UInt(offsetBits.W)
+  val reqSource = UInt(MemReqSource.reqSourceBits.W)
+}
 class AcquireUnit(implicit p: Parameters) extends L2Module {
   val io = IO(new Bundle() {
     val sourceA = DecoupledIO(new TLBundleA(edgeOut.bundle))
     val task = Flipped(DecoupledIO(new SourceAReq))
     val pbRead = DecoupledIO(new PutBufferRead)
     val pbResp = Flipped(ValidIO(new PutBufferEntry))
+    val hintBypass = Flipped(ValidIO(new HintBypassBundle))
   })
 
   val a = io.sourceA
   val a_out = Wire(a.cloneType)
   val a_acquire = Wire(a.cloneType)
   val a_put = Wire(a.cloneType)
+  val a_hint2llc = Wire(a.cloneType)
   val task = io.task.bits
   val put = task.opcode === PutFullData || task.opcode === PutPartialData
   val busy = RegInit(false.B)
@@ -98,9 +109,24 @@ class AcquireUnit(implicit p: Parameters) extends L2Module {
   a_put.bits.data := s1_pb_latch.data.data
   a_put.bits.corrupt := false.B
 
-
+  val a_hintQueue = Module(new Queue(new HintBypassBundle, 16, pipe=true, flow=true))
+  a_hintQueue.io.enq.valid := io.hintBypass.valid
+  a_hintQueue.io.enq.bits  := io.hintBypass.bits
+  val a_hintDeq = a_hintQueue.io.deq
+  a_hintDeq.ready := a_hint2llc.ready
+  a_hint2llc.valid := a_hintDeq.valid
+  a_hint2llc.bits.opcode := a_hintDeq.bits.opcode
+  a_hint2llc.bits.param := a_hintDeq.bits.param
+  a_hint2llc.bits.size := offsetBits.U
+  a_hint2llc.bits.source := a_hintDeq.bits.sourceId
+  a_hint2llc.bits.address := Cat(a_hintDeq.bits.tag, a_hintDeq.bits.set, 0.U(offsetBits.W))
+  a_hint2llc.bits.mask := Fill(edgeOut.manager.beatBytes, 1.U(1.W))
+  a_hint2llc.bits.data := 0.U((edgeOut.manager.beatBytes * 8).W)
+  a_hint2llc.bits.echo.lift(DirtyKey).foreach(_ := true.B)
+  a_hint2llc.bits.user.lift(utility.ReqSourceKey).foreach(_ := a_hintDeq.bits.reqSource)
+  a_hint2llc.bits.corrupt := false.B
   
-  TLArbiter.lowest(edgeOut, a_out, a_put, a_acquire)
+  TLArbiter.lowest(edgeOut, a_out, a_put, a_acquire, a_hint2llc)
   io.sourceA <> a_out
   io.sourceA.valid := a_out.valid && !(a_acquire.valid && !a_put.valid && busy)
 

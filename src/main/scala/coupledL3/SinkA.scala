@@ -127,7 +127,6 @@ class SinkA(implicit p: Parameters) extends L3Module {
 
   // TODO: How about put with only one beat?
   val commonReq = Wire(io.toReqArb.cloneType)
-  val prefetchReq = prefetchOpt.map(_ => Wire(io.toReqArb.cloneType))
 
   s1_ready := commonReq.ready
   io.a.ready := !first_1 || s0_ready && hasData && !io.fromPutDataBuf.full || commonReq.ready && !hasData && !s0_full
