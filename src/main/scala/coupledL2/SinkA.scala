@@ -25,6 +25,7 @@ import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLHints._
 import coupledL2.prefetch.PrefetchReq
 import coupledL2.utils.XSPerfAccumulate
+import utility._
 
 class SinkA(implicit p: Parameters) extends L2Module {
   val io = IO(new Bundle() {
@@ -135,11 +136,11 @@ class SinkA(implicit p: Parameters) extends L2Module {
   commonReq.valid := io.a.valid && first && !noSpace
   commonReq.bits := fromTLAtoTaskBundle(io.a.bits)
   if (prefetchOpt.nonEmpty) {
-    val prefetchReqReg = RegEnable(io.prefetchReq.get.bits, init=0.U.asTypeOf(new PrefetchReq), enable=io.prefetchReq.get.valid)
-    val prefetchValid = RegNext(io.prefetchReq.get.valid)
-    prefetchReq.get.valid := prefetchValid
-    prefetchReq.get.bits := fromPrefetchReqtoTaskBundle(prefetchReqReg)
-    io.prefetchReq.get.ready := prefetchReq.get.ready
+    val pipe = Module(new Pipeline(io.prefetchReq.get.bits.cloneType, 1))
+    pipe.io.in <> io.prefetchReq.get
+    prefetchReq.get.valid := pipe.io.out.valid
+    prefetchReq.get.bits  := fromPrefetchReqtoTaskBundle(pipe.io.out.bits)
+    pipe.io.out.ready := prefetchReq.get.ready
     fastArb(Seq(commonReq, prefetchReq.get), io.toReqArb)
   } else {
     io.toReqArb <> commonReq
