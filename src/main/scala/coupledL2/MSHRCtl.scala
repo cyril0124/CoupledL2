@@ -141,7 +141,7 @@ class MSHRCtl(implicit p: Parameters) extends L2Module {
   io.sourceA <> acquireUnit.io.sourceA
   io.pbRead <> acquireUnit.io.pbRead
   io.pbResp <> acquireUnit.io.pbResp
-  acquireUnit.io.hintBypass.valid := io.fromMainPipe.mshr_alloc_s3.bits.task.needHint2llc.getOrElse(false.B)
+  acquireUnit.io.hintBypass.valid := io.fromMainPipe.mshr_alloc_s3.bits.task.needHint2llc.getOrElse(false.B) && io.fromMainPipe.mshr_alloc_s3.valid
   acquireUnit.io.hintBypass.bits.opcode  := io.fromMainPipe.mshr_alloc_s3.bits.task.opcode
   acquireUnit.io.hintBypass.bits.param    := io.fromMainPipe.mshr_alloc_s3.bits.task.param     
   acquireUnit.io.hintBypass.bits.size     := io.fromMainPipe.mshr_alloc_s3.bits.task.size      
