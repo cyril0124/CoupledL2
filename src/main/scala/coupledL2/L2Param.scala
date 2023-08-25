@@ -138,7 +138,7 @@ case class L2Param
   // Prefetch
   prefetch: Option[PrefetchParameters] = None,
   // Performance analysis
-  enablePerf: Boolean = true,
+  enablePerf: Boolean = false,
   // Monitor
   enableMonitor: Boolean = true,
   // TopDown

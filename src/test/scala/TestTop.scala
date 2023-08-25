@@ -581,9 +581,9 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     val perfClean = WireInit(false.B)
     val perfDump = WireInit(false.B)
 
-    BoringUtils.addSink(logTimestamp, "logTimestamp")
-    BoringUtils.addSink(perfClean, "XSPERF_CLEAN")
-    BoringUtils.addSink(perfDump, "XSPERF_DUMP")
+    BoringUtils.addSource(logTimestamp, "logTimestamp")
+    BoringUtils.addSource(perfClean, "XSPERF_CLEAN")
+    BoringUtils.addSource(perfDump, "XSPERF_DUMP")
   
     perfClean := io.perfClean
     perfDump := io.perfDump
