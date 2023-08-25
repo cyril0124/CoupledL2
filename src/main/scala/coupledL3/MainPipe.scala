@@ -1094,10 +1094,13 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm))
   XSPerfAccumulate(cacheParams, "get_miss", miss_s3 && req_s3.fromA && req_s3.opcode === Get)
 
-  // XSPerfAccumulate(cacheParams, "a_req_need_replacement",
-  //   io.toMSHRCtl.mshr_alloc_s3.valid && !alloc_state.s_release || task_s3.valid && mainpipe_release)
+  XSPerfAccumulate(cacheParams, "c_req_miss", miss_s3 && req_s3.fromC)
+  XSPerfAccumulate(cacheParams, "c_req_hit", hit_s3 && req_s3.fromC)
+
   XSPerfAccumulate(cacheParams, "a_req_need_replacement",
-    (io.toMSHRCtl.mshr_alloc_s3.valid && !io.toMSHRCtl.mshr_alloc_s3.bits.state.s_release || task_s3.valid && mainpipe_release) && s3_fire)
+    io.toMSHRCtl.mshr_alloc_s3.valid && a_need_replacement && req_s3.fromA)
+  XSPerfAccumulate(cacheParams, "c_req_need_replacement",
+    io.toMSHRCtl.mshr_alloc_s3.valid && c_need_replacement && req_s3.fromC)
 
   XSPerfAccumulate(cacheParams, "b_req_hit", hit_s3 && req_s3.fromB)
   XSPerfAccumulate(cacheParams, "b_req_miss", miss_s3 && req_s3.fromB)
