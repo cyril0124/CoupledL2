@@ -65,7 +65,7 @@ object ReplacementPolicy {
 
 class RandomReplacement(n_ways: Int) extends ReplacementPolicy {
   private val replace = Wire(Bool())
-  replace := true.B
+  replace := false.B
   def nBits = 16
   def perSet = false
   private val lfsr = LFSR(nBits, replace)

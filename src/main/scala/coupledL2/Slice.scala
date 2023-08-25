@@ -37,7 +37,6 @@ class Slice()(implicit p: Parameters) extends L2Module {
     val prefetch = prefetchOpt.map(_ => Flipped(new PrefetchIO))
     val msStatus = topDownOpt.map(_ => Vec(mshrsAll, ValidIO(new MSHRStatus)))
     val dirResult = topDownOpt.map(_ => ValidIO(new DirResult))
-    val latePF = topDownOpt.map(_ => Output(Bool()))
   })
 
   val reqArb = Module(new RequestArb())
@@ -48,29 +47,22 @@ class Slice()(implicit p: Parameters) extends L2Module {
   val dataStorage = Module(new DataStorage())
   val refillUnit = Module(new RefillUnit())
   val sinkA = Module(new SinkA)
-  val sinkB = Module(new SinkB)
-  val sinkC = Module(new SinkC)
+  val sinkC = Module(new SinkC) // or ReleaseUnit?
   val sourceC = Module(new SourceC)
   val grantBuf = if (!useFIFOGrantBuffer) Module(new GrantBuffer) else Module(new GrantBufferFIFO)
-  val refillBuf = Module(new MSHRBuffer(wPorts = 3))
+  val refillBuf = Module(new MSHRBuffer(wPorts = 2))
   val releaseBuf = Module(new MSHRBuffer(wPorts = 3))
 
-  val prbq = Module(new ProbeQueue())
-  prbq.io <> DontCare // @XiaBin TODO
-
-  a_reqBuf.io.in <> sinkA.io.task
-  a_reqBuf.io.mshrInfo := mshrCtl.io.msInfo
+  a_reqBuf.io.in <> sinkA.io.toReqArb
+  a_reqBuf.io.mshrStatus := mshrCtl.io.toReqBuf
   a_reqBuf.io.mainPipeBlock := mainPipe.io.toReqBuf
-  a_reqBuf.io.s1Entrance := reqArb.io.s1Entrance
-  sinkB.io.msInfo := mshrCtl.io.msInfo
-  sinkC.io.msInfo := mshrCtl.io.msInfo
+  a_reqBuf.io.sinkEntrance := reqArb.io.sinkEntrance
 
   reqArb.io.sinkA <> a_reqBuf.io.out
   reqArb.io.ATag := a_reqBuf.io.ATag
   reqArb.io.ASet := a_reqBuf.io.ASet
 
-  reqArb.io.sinkB <> sinkB.io.task
-  reqArb.io.sinkC <> sinkC.io.task
+  reqArb.io.sinkC <> sinkC.io.toReqArb
   reqArb.io.dirRead_s1 <> directory.io.read
   reqArb.io.taskToPipe_s2 <> mainPipe.io.taskFromArb_s2
   reqArb.io.mshrTask <> mshrCtl.io.mshrTask
@@ -86,14 +78,12 @@ class Slice()(implicit p: Parameters) extends L2Module {
   mshrCtl.io.resps.sinkE := grantBuf.io.e_resp
   mshrCtl.io.resps.sourceC := sourceC.io.resp
   mshrCtl.io.nestedwb := mainPipe.io.nestedwb
-  mshrCtl.io.bMergeTask := sinkB.io.bMergeTask
-  mshrCtl.io.replResp <> directory.io.replResp
-  mainPipe.io.replResp <> directory.io.replResp
+  mshrCtl.io.pbRead <> sinkA.io.pbRead
+  mshrCtl.io.pbResp <> sinkA.io.pbResp
 
   directory.io.resp <> mainPipe.io.dirResp_s3
   directory.io.metaWReq <> mainPipe.io.metaWReq
   directory.io.tagWReq <> mainPipe.io.tagWReq
-  directory.io.msInfo <> mshrCtl.io.msInfo
 
   dataStorage.io.req <> mainPipe.io.toDS.req_s3
   dataStorage.io.wdata := mainPipe.io.toDS.wdata_s3
@@ -112,19 +102,16 @@ class Slice()(implicit p: Parameters) extends L2Module {
   mainPipe.io.globalCounter := grantBuf.io.globalCounter
   mainPipe.io.taskInfo_s1 <> reqArb.io.taskInfo_s1
 
-  // priority: nested-ReleaseData / probeAckData [NEW] > mainPipe DS rdata [OLD]
-  // 0/1 might happen at the same cycle with 2
-  releaseBuf.io.w(0).valid := mshrCtl.io.nestedwbDataId.valid
-  releaseBuf.io.w(0).beat_sel := Fill(beatSize, 1.U(1.W))
-  releaseBuf.io.w(0).data := mainPipe.io.nestedwbData
-  releaseBuf.io.w(0).id := mshrCtl.io.nestedwbDataId.bits
-  releaseBuf.io.w(1) <> sinkC.io.releaseBufWrite
-  releaseBuf.io.w(1).id := mshrCtl.io.releaseBufWriteId
-  releaseBuf.io.w(2) <> mainPipe.io.releaseBufWrite
+  releaseBuf.io.w(0) <> sinkC.io.releaseBufWrite
+  releaseBuf.io.w(0).id := mshrCtl.io.releaseBufWriteId
+  releaseBuf.io.w(1) <> mainPipe.io.releaseBufWrite
+  releaseBuf.io.w(2).valid := mshrCtl.io.nestedwbDataId.valid
+  releaseBuf.io.w(2).beat_sel := Fill(beatSize, 1.U(1.W))
+  releaseBuf.io.w(2).data := mainPipe.io.nestedwbData
+  releaseBuf.io.w(2).id := mshrCtl.io.nestedwbDataId.bits
 
   refillBuf.io.w(0) <> refillUnit.io.refillBufWrite
-  refillBuf.io.w(1) <> sinkC.io.refillBufWrite
-  refillBuf.io.w(2) <> mainPipe.io.refillBufWrite
+  refillBuf.io.w(1) <> mainPipe.io.refillBufWrite
 
   sourceC.io.in <> mainPipe.io.toSourceC
   
@@ -159,7 +146,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
   /* connect downward channels */
   io.out.a <> outBuf.a(mshrCtl.io.sourceA)
-  sinkB.io.b <> outBuf.b(io.out.b)
+  reqArb.io.sinkB <> outBuf.b(io.out.b)
   io.out.c <> outBuf.c(sourceC.io.out)
   refillUnit.io.sinkD <> outBuf.d(io.out.d)
   io.out.e <> outBuf.e(refillUnit.io.sourceE)
@@ -172,7 +159,6 @@ class Slice()(implicit p: Parameters) extends L2Module {
       io.msStatus.get        := mshrCtl.io.msStatus.get
       io.dirResult.get.valid := RegNextN(directory.io.read.fire, 2, Some(false.B)) // manually generate dirResult.valid
       io.dirResult.get.bits  := directory.io.resp
-      io.latePF.get          := a_reqBuf.io.hasLatePF
     }
   )
 
@@ -198,9 +184,6 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
   if (cacheParams.enableMonitor) {
     val monitor = Module(new Monitor())
-    monitor.io.fromMainPipe <> mainPipe.io.toMonitor
-//  monitor.io.nestedWBValid := mshrCtl.io.nestedwbDataId.valid
-  } else {
-    mainPipe.io.toMonitor <> DontCare
+    mainPipe.io.toMonitor <> monitor.io.fromMainPipe
   }
 }

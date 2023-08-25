@@ -21,9 +21,9 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.util.SetAssocLRU
 import coupledL2.utils._
-import utility.{ParallelPriorityMux, RegNextN}
+import utility.ParallelPriorityMux
 import chipsalliance.rocketchip.config.Parameters
-import freechips.rocketchip.tilelink.TLMessages._
+import freechips.rocketchip.tilelink.TLMessages
 import xs.utils.sram.SRAMTemplate
 
 class MetaEntry(implicit p: Parameters) extends L2Bundle {
@@ -61,12 +61,8 @@ object MetaEntry {
 class DirRead(implicit p: Parameters) extends L2Bundle {
   val tag = UInt(tagBits.W)
   val set = UInt(setBits.W)
-  // dirResult.way must only be in the wayMask
   val wayMask = UInt(cacheParams.ways.W)
   val replacerInfo = new ReplacerInfo()
-  // dirRead when refill
-  val refill = Bool()
-  val mshrId = UInt(mshrBits.W)
 }
 
 class DirResult(implicit p: Parameters) extends L2Bundle {
@@ -77,15 +73,6 @@ class DirResult(implicit p: Parameters) extends L2Bundle {
   val meta = new MetaEntry()
   val error = Bool()
   val replacerInfo = new ReplacerInfo() // for TopDown usage
-}
-
-class ReplacerResult(implicit p: Parameters) extends L2Bundle {
-  val tag = UInt(tagBits.W)
-  val set = UInt(setBits.W)
-  val way = UInt(wayBits.W)
-  val meta = new MetaEntry()
-  val mshrId = UInt(mshrBits.W)
-  val retry = Bool()
 }
 
 class MetaWrite(implicit p: Parameters) extends L2Bundle {
@@ -107,20 +94,7 @@ class Directory(implicit p: Parameters) extends L2Module {
     val resp = Output(new DirResult)
     val metaWReq = Flipped(ValidIO(new MetaWrite))
     val tagWReq = Flipped(ValidIO(new TagWrite))
-    val replResp = ValidIO(new ReplacerResult)
-    // used to count occWays for Grant to retry
-    val msInfo = Vec(mshrsAll, Flipped(ValidIO(new MSHRInfo)))
   })
-
-  //  TODO: debug address consider multi-bank
-  def restoreAddr(set: UInt, tag: UInt) = {
-    (set << offsetBits).asUInt + (tag << (setBits + offsetBits)).asUInt
-  }
-  val debug_addr_resp = restoreAddr(io.resp.set, io.resp.tag)
-  val debug_addr_replResp = restoreAddr(io.replResp.bits.set, io.replResp.bits.tag)
-  dontTouch(debug_addr_resp)
-  dontTouch(debug_addr_replResp)
-
 
   def invalid_way_sel(metaVec: Seq[MetaEntry], repl: UInt) = {
     val invalid_vec = metaVec.map(_.state === MetaData.INVALID)
@@ -135,35 +109,16 @@ class Directory(implicit p: Parameters) extends L2Module {
 
   val tagWen  = io.tagWReq.valid
   val metaWen = io.metaWReq.valid
-  val replacerWen = WireInit(false.B)
+  val replacerWen = RegInit(false.B)
 
   val tagArray  = Module(new BankedSRAM(UInt(tagBits.W), sets, ways, banks, singlePort = true, enableClockGate = true))
   val metaArray = Module(new SRAMTemplate(new MetaEntry, sets, ways, singlePort = true, hasClkGate = true))
   val tagRead = Wire(Vec(ways, UInt(tagBits.W)))
   val metaRead = Wire(Vec(ways, new MetaEntry()))
 
+  val reqValidReg = RegNext(io.read.fire, false.B)
   val resetFinish = RegInit(false.B)
   val resetIdx = RegInit((sets - 1).U)
-
-  // Replacer
-  val repl = ReplacementPolicy.fromString(cacheParams.replacement, ways)
-  val random_repl = cacheParams.replacement == "random"
-  val replacer_sram_opt = if(random_repl) None else
-    Some(Module(new SRAMTemplate(UInt(repl.nBits.W), sets, 1, singlePort = true, shouldReset = true, hasClkGate = enableClockGate)))
-
-  /* ====== Generate response signals ====== */
-  // hit/way calculation in stage 3, Cuz SRAM latency is high under high frequency
-  /* stage 1: io.read.fire, access Tag/Meta
-     stage 2: get Tag/Meta, latch
-     stage 3: calculate hit/way and chosen meta/tag by way
-  */
-  val reqValid_s2 = RegNext(io.read.fire, false.B)
-  val reqValid_s3 = RegNext(reqValid_s2, false.B)
-  val req_s2 = RegEnable(io.read.bits, 0.U.asTypeOf(io.read.bits), io.read.fire)
-  val req_s3 = RegEnable(req_s2, 0.U.asTypeOf(req_s2), reqValid_s2)
-
-  val refillReqValid_s2 = RegNext(io.read.fire && io.read.bits.refill, false.B)
-  val refillReqValid_s3 = RegNext(refillReqValid_s2, false.B)
 
   // Tag R/W
   tagRead := tagArray.io.r(io.read.fire, io.read.bits.set).resp.data
@@ -183,31 +138,114 @@ class Directory(implicit p: Parameters) extends L2Module {
     io.metaWReq.bits.wayOH
   )
 
-  val metaAll_s3 = RegEnable(metaRead, 0.U.asTypeOf(metaRead), reqValid_s2)
-  val tagAll_s3 = RegEnable(tagRead, 0.U.asTypeOf(tagRead), reqValid_s2)
+  // Generate response signals
+  /* stage 1: io.read.fire, access Tag/Meta
+     stage 2: get Tag/Meta, calculate hit/way
+     stage 3: output latched hit/way and chosen meta/tag by way
+  */
+  // TODO: how about moving hit/way calculation to stage 2? Cuz SRAM latency can be high under high frequency
+  val reqReg = RegEnable(io.read.bits, 0.U.asTypeOf(io.read.bits), enable = io.read.fire)
+  val hit_s2 = Wire(Bool())
+  val way_s2 = Wire(UInt(wayBits.W))
 
-  val tagMatchVec = tagAll_s3.map(_ (tagBits - 1, 0) === req_s3.tag)
-  val metaValidVec = metaAll_s3.map(_.state =/= MetaData.INVALID)
+  // Replacer
+  val repl = ReplacementPolicy.fromString(cacheParams.replacement, ways)
+  val random_repl = cacheParams.replacement == "random"
+  val replacer_sram_opt = if(random_repl) None else
+    Some(Module(new SRAMTemplate(UInt(repl.nBits.W), sets, 1, singlePort = true, shouldReset = true, hasClkGate = enableClockGate)))
+
+  val repl_state = if(random_repl){
+    when(io.tagWReq.fire){
+      repl.miss
+    }
+    0.U
+  } else if(cacheParams.replacement == "srrip"){
+    val repl_sram_r = replacer_sram_opt.get.io.r(io.read.fire(), io.read.bits.set).resp.data(0)
+    val repl_state_hold = WireInit(0.U(repl.nBits.W))
+    repl_state_hold := HoldUnless(repl_sram_r, RegNext(io.read.fire(), false.B))
+    val next_state = repl.get_next_state(repl_state_hold, way_s2, hit_s2)
+    val repl_init = Wire(Vec(ways, UInt(2.W)))
+    repl_init.foreach(_ := 2.U(2.W))
+    replacer_sram_opt.get.io.w(
+      !resetFinish || replacerWen,
+      Mux(resetFinish, RegNext(next_state, 0.U.asTypeOf(next_state)), repl_init.asUInt),
+      Mux(resetFinish, RegNext(reqReg.set, 0.U.asTypeOf(reqReg.set)), resetIdx),
+      1.U
+    )
+
+    repl_state_hold
+  } else if(cacheParams.replacement == "drrip"){
+    //Set Dueling
+    val PSEL = RegInit(512.U(10.W)) //32-monitor sets, 10-bits psel
+    // track monitor sets' hit rate for each policy: srrip-0,128...3968;brrip-64,192...4032
+    when(reqValidReg && (reqReg.set(6,0)===0.U) && !hit_s2){  //SDMs_srrip miss
+      PSEL := PSEL + 1.U
+    } .elsewhen(reqValidReg && (reqReg.set(6,0)===64.U) && !hit_s2){ //SDMs_brrip miss
+      PSEL := PSEL - 1.U
+    }
+
+    val repl_sram_r = replacer_sram_opt.get.io.r(io.read.fire(), io.read.bits.set).resp.data(0)
+    val repl_state_hold = WireInit(0.U(repl.nBits.W))
+    repl_state_hold := HoldUnless(repl_sram_r, RegNext(io.read.fire(), false.B))
+    // decide use which policy by policy selection counter, for insertion
+    /*if set -> SDMs: use fix policy
+      else if PSEL(MSB)==0: use srrip
+      else if PSEL(MSB)==1: use brrip*/
+    val repl_type = WireInit(false.B)
+    repl_type := Mux(reqReg.set(6,0)===0.U, false.B, 
+                    Mux(reqReg.set(6,0)===64.U, true.B,
+                      Mux(PSEL(9)===0.U, false.B, true.B)))    // false.B - srrip, true.B - brrip
+    val next_state = repl.get_next_state(repl_state_hold, way_s2, hit_s2, repl_type)
+
+    val repl_init = Wire(Vec(ways, UInt(2.W)))
+    repl_init.foreach(_ := 2.U(2.W))
+    replacer_sram_opt.get.io.w(
+      !resetFinish || replacerWen,
+      Mux(resetFinish, RegNext(next_state, 0.U.asTypeOf(next_state)), repl_init.asUInt),
+      Mux(resetFinish, RegNext(reqReg.set, 0.U.asTypeOf(reqReg.set)), resetIdx),
+      1.U
+    )
+
+    repl_state_hold
+  } else {
+    val repl_sram_r = replacer_sram_opt.get.io.r(io.read.fire, io.read.bits.set).resp.data(0)
+    val repl_state_hold = WireInit(0.U(repl.nBits.W))
+    repl_state_hold := HoldUnless(repl_sram_r, RegNext(io.read.fire, false.B))
+    val next_state = repl.get_next_state(repl_state_hold, way_s2)
+    replacer_sram_opt.get.io.w(
+      !resetFinish || replacerWen,
+      Mux(resetFinish, RegNext(next_state, 0.U.asTypeOf(next_state)), 0.U),
+      Mux(resetFinish, RegNext(reqReg.set, 0.U.asTypeOf(reqReg.set)), resetIdx),
+      1.U
+    )
+    repl_state_hold
+  }
+
+  val tagMatchVec = tagRead.map(_ (tagBits - 1, 0) === reqReg.tag)
+  val metaValidVec = metaRead.map(_.state =/= MetaData.INVALID)
   val hitVec = tagMatchVec.zip(metaValidVec).map(x => x._1 && x._2)
-
   val hitWay = OHToUInt(hitVec)
-  val replaceWay = WireInit(UInt(wayBits.W), 0.U)
-  val (inv, invalidWay) = invalid_way_sel(metaAll_s3, replaceWay)
+  val replaceWay = repl.get_replace_way(repl_state)
+  val (inv, invalidWay) = invalid_way_sel(metaRead, replaceWay)
   val chosenWay = Mux(inv, invalidWay, replaceWay)
   // if chosenWay not in wayMask, then choose a way in wayMask
-  // TODO: consider remove this is not used for better timing
   val finalWay = Mux(
-    req_s3.wayMask(chosenWay),
+    reqReg.wayMask(chosenWay),
     chosenWay,
-    PriorityEncoder(req_s3.wayMask) // can be optimized
+    PriorityEncoder(reqReg.wayMask)
   )
 
-  val hit_s3 = Cat(hitVec).orR
-  val way_s3 = Mux(hit_s3, hitWay, finalWay)
+  hit_s2 := Cat(hitVec).orR
+  way_s2 := Mux(hit_s2, hitWay, finalWay)
+
+  val hit_s3 = RegEnable(hit_s2, false.B, reqValidReg)
+  val way_s3 = RegEnable(way_s2, 0.U, reqValidReg)
+  val metaAll_s3 = RegEnable(metaRead, 0.U.asTypeOf(metaRead), reqValidReg)
+  val tagAll_s3 = RegEnable(tagRead, 0.U.asTypeOf(tagRead), reqValidReg)
   val meta_s3 = metaAll_s3(way_s3)
   val tag_s3 = tagAll_s3(way_s3)
-  val set_s3 = req_s3.set
-  val replacerInfo_s3 = req_s3.replacerInfo
+  val set_s3 = RegEnable(reqReg.set, reqValidReg)
+  val replacerInfo_s3 = RegEnable(reqReg.replacerInfo, reqValidReg)
 
   io.resp.hit   := hit_s3
   io.resp.way   := way_s3
@@ -221,103 +259,17 @@ class Directory(implicit p: Parameters) extends L2Module {
   dontTouch(metaArray.io)
   dontTouch(tagArray.io)
 
-  //[deprecated] io.read.ready := !io.metaWReq.valid && !io.tagWReq.valid && !replacerWen
+  // io.read.ready := !io.metaWReq.valid && !io.tagWReq.valid && !replacerWen
   val replacerRready = if(cacheParams.replacement == "random") true.B else replacer_sram_opt.get.io.r.req.ready
   io.read.ready := tagArray.io.r.req.ready && metaArray.io.r.req.ready && replacerRready
 
-  /* ====== refill retry ====== */
-  // if refill chooses a way that has not finished writing its refillData back to DS (in MSHR Release),
-  // or the way is using by Alias-Acquire,
-  // we cancel the Grant and let it retry
-  // TODO: timing?
-  val wayConflictMask = VecInit(io.msInfo.map(s =>
-    s.valid && s.bits.set === req_s3.set && (s.bits.releaseNotSent || s.bits.dirHit) && s.bits.way === finalWay
-  )).asUInt
-  val refillRetry = wayConflictMask.orR
-
-  /* ======!! Replacement logic !!====== */
-  /* ====== Read, choose replaceWay ====== */
-  val repl_state_s3 = if(random_repl) {
-    when(io.tagWReq.fire){
-      repl.miss
-    }
-    0.U
-  } else {
-    val repl_sram_r = replacer_sram_opt.get.io.r(io.read.fire, io.read.bits.set).resp.data(0)
-    val repl_state = RegEnable(repl_sram_r, 0.U(repl.nBits.W), reqValid_s2)
-    repl_state
+  val update = reqReg.replacerInfo.channel(0) && (reqReg.replacerInfo.opcode === TLMessages.AcquirePerm || reqReg.replacerInfo.opcode === TLMessages.AcquireBlock)
+  when(reqValidReg && update) {
+    replacerWen := true.B
+  }.otherwise {
+    replacerWen := false.B
   }
 
-  replaceWay := repl.get_replace_way(repl_state_s3)
-
-  io.replResp.valid := refillReqValid_s3
-  io.replResp.bits.tag := tagAll_s3(finalWay)
-  io.replResp.bits.set := req_s3.set
-  io.replResp.bits.way := finalWay
-  io.replResp.bits.meta := metaAll_s3(finalWay)
-  io.replResp.bits.mshrId := req_s3.mshrId
-  io.replResp.bits.retry := refillRetry
-
-  /* ====== Update ====== */
-  // update replacer only when A hit or refill, at stage 3
-  val updateHit = reqValid_s3 && hit_s3 && req_s3.replacerInfo.channel(0) &&
-    (req_s3.replacerInfo.opcode === AcquirePerm || req_s3.replacerInfo.opcode === AcquireBlock)
-  val updateRefill = refillReqValid_s3 && !refillRetry
-  replacerWen := updateHit || updateRefill
-
-  // !!![TODO]!!! check this @CLS
-  // hit-Promotion, miss-Insertion for RRIP, so refill should hit = false.B
-  val touch_way_s3 = Mux(refillReqValid_s3, replaceWay, way_s3)
-  val rrip_hit_s3 = Mux(refillReqValid_s3, false.B, hit_s3)
-
-  if(cacheParams.replacement == "srrip"){
-    val next_state_s3 = repl.get_next_state(repl_state_s3, touch_way_s3, rrip_hit_s3)
-    val repl_init = Wire(Vec(ways, UInt(2.W)))
-    repl_init.foreach(_ := 2.U(2.W))
-    replacer_sram_opt.get.io.w(
-      !resetFinish || replacerWen,
-      Mux(resetFinish, next_state_s3, repl_init.asUInt),
-      Mux(resetFinish, set_s3, resetIdx),
-      1.U
-    )
-  } else if(cacheParams.replacement == "drrip"){
-    //Set Dueling
-    val PSEL = RegInit(512.U(10.W)) //32-monitor sets, 10-bits psel
-    // track monitor sets' hit rate for each policy: srrip-0,128...3968;brrip-64,192...4032
-    when(refillReqValid_s3 && (set_s3(6,0)===0.U) && !rrip_hit_s3){  //SDMs_srrip miss
-      PSEL := PSEL + 1.U
-    } .elsewhen(refillReqValid_s3 && (set_s3(6,0)===64.U) && !rrip_hit_s3){ //SDMs_brrip miss
-      PSEL := PSEL - 1.U
-    }
-    // decide use which policy by policy selection counter, for insertion
-    /* if set -> SDMs: use fix policy
-       else if PSEL(MSB)==0: use srrip
-       else if PSEL(MSB)==1: use brrip */
-    val repl_type = WireInit(false.B)
-    repl_type := Mux(set_s3(6,0)===0.U, false.B,
-      Mux(set_s3(6,0)===64.U, true.B,
-        Mux(PSEL(9)===0.U, false.B, true.B)))    // false.B - srrip, true.B - brrip
-    val next_state_s3 = repl.get_next_state(repl_state_s3, touch_way_s3, rrip_hit_s3, repl_type)
-
-    val repl_init = Wire(Vec(ways, UInt(2.W)))
-    repl_init.foreach(_ := 2.U(2.W))
-    replacer_sram_opt.get.io.w(
-      !resetFinish || replacerWen,
-      Mux(resetFinish, next_state_s3, repl_init.asUInt),
-      Mux(resetFinish, set_s3, resetIdx),
-      1.U
-    )
-  } else {
-    val next_state_s3 = repl.get_next_state(repl_state_s3, touch_way_s3)
-    replacer_sram_opt.get.io.w(
-      !resetFinish || replacerWen,
-      Mux(resetFinish, next_state_s3, 0.U),
-      Mux(resetFinish, set_s3, resetIdx),
-      1.U
-    )
-  }
-
-  /* ====== Reset ====== */
   when(resetIdx === 0.U) {
     resetFinish := true.B
   }
@@ -325,6 +277,6 @@ class Directory(implicit p: Parameters) extends L2Module {
     resetIdx := resetIdx - 1.U
   }
 
-  XSPerfAccumulate(cacheParams, "dirRead_cnt", io.read.fire)
-  XSPerfAccumulate(cacheParams, "choose_busy_way", reqValid_s3 && !req_s3.wayMask(chosenWay))
+  XSPerfAccumulate(cacheParams, "dirRead_cnt", reqValidReg)
+  XSPerfAccumulate(cacheParams, "choose_busy_way", reqValidReg && !reqReg.wayMask(chosenWay))
 }

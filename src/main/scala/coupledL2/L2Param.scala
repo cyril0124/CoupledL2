@@ -25,7 +25,8 @@ import freechips.rocketchip.util._
 import chipsalliance.rocketchip.config.Field
 import huancun.CacheParameters
 import coupledL2.prefetch._
-import utility.{MemReqSource, ReqSourceKey}
+import MemReqSource._
+import utility.ReqSourceKey
 
 // General parameter key of CoupledL2
 case object L2ParamKey extends Field[L2Param](L2Param())
@@ -38,7 +39,6 @@ case class L1Param
   ways: Int = 8,
   blockBytes: Int = 64,
   aliasBitsOpt: Option[Int] = None,
-  vaddrBitsOpt: Option[Int] = None
 ) {
   val capacity = sets * ways * blockBytes
   val setBits = log2Ceil(sets)
@@ -49,15 +49,6 @@ case class L1Param
 // Indicate alias bit of upper level cache
 case object AliasKey extends ControlKey[UInt]("alias")
 case class AliasField(width: Int) extends BundleField(AliasKey) {
-  override def data: UInt = Output(UInt(width.W))
-  override def default(x: UInt): Unit = {
-    x := 0.U(width.W)
-  }
-}
-
-// Pass virtual address of upper level cache
-case object VaddrKey extends ControlKey[UInt]("vaddr")
-case class VaddrField(width: Int) extends BundleField(VaddrKey) {
   override def data: UInt = Output(UInt(width.W))
   override def default(x: UInt): Unit = {
     x := 0.U(width.W)
@@ -142,9 +133,7 @@ case class L2Param
   // Monitor
   enableMonitor: Boolean = true,
   // TopDown
-  elaboratedTopDown: Boolean = true,
-  // env
-  FPGAPlatform: Boolean = false
+  elaboratedTopDown: Boolean = true
 ) {
   def toCacheParams: CacheParameters = CacheParameters(
     name = name,

@@ -20,8 +20,8 @@ package coupledL2
 import chisel3._
 import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
+
 import freechips.rocketchip.tilelink.TLPermissions._
-import utility.MemReqSource
 
 abstract class L2Module(implicit val p: Parameters) extends MultiIOModule with HasCoupledL2Parameters
 abstract class L2Bundle(implicit val p: Parameters) extends Bundle with HasCoupledL2Parameters
@@ -46,19 +46,22 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {
   val tag = UInt(tagBits.W)
   val off = UInt(offsetBits.W)
   val alias = aliasBitsOpt.map(_ => UInt(aliasBitsOpt.get.W)) // color bits in cache-alias issue
-  val vaddr = vaddrBitsOpt.map(_ => UInt(vaddrBitsOpt.get.W)) // vaddr passed by client cache
   val opcode = UInt(3.W)                  // type of the task operation
   val param = UInt(3.W)
   val size = UInt(msgSizeBits.W)
   val sourceId = UInt(sourceIdBits.W)     // tilelink sourceID
   val bufIdx = UInt(bufIdxBits.W)         // idx of SinkC buffer
-  val needProbeAckData = Bool()           // only used for SinkB reqs, whether L3 needs probeAckData
+  val needProbeAckData = Bool()           // only used for SinkB reqs
 
+  // val mshrOpType = UInt(mshrOpTypeBits.W) // type of the MSHR task operation
   // MSHR may send Release(Data) or Grant(Data) or ProbeAck(Data) through Main Pipe
   val mshrTask = Bool()                   // is task from mshr
   val mshrId = UInt(mshrBits.W)           // mshr entry index (used only in mshr-task)
   val aliasTask = aliasBitsOpt.map(_ => Bool()) // Anti-alias
   val useProbeData = Bool()               // data source, true for ReleaseBuf and false for RefillBuf
+
+  // For Put
+  val pbIdx = UInt(mshrBits.W)
 
   // For Intent
   val fromL2pft = prefetchOpt.map(_ => Bool()) // Is the prefetch req from L2(BOP) or from L1 prefetch?
@@ -75,17 +78,9 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {
   val tagWen = Bool()
   val dsWen = Bool()
 
-  // for Dir to choose a way inside wayMask
+  // for Dir to choose a way not occupied by some unfinished MSHR task
   val wayMask = UInt(cacheParams.ways.W)
 
-  // for Grant to read replacer to choose a replaced way
-  // for Release to read refillBuf and write to DS
-  val replTask = Bool()
-
-  // for refillBuf data -> dataStroage
-  val mergeTask = Bool()
-
-  // for TopDown Monitor (# TopDown)
   val reqSource = UInt(MemReqSource.reqSourceBits.W)
 
   def hasData = opcode(0)
@@ -94,43 +89,39 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {
 class PipeStatus(implicit p: Parameters) extends L2Bundle with HasChannelBits
 
 class PipeEntranceStatus(implicit p: Parameters) extends L2Bundle {
-  val tags = Vec(4, UInt(tagBits.W))
-  val sets = Vec(4, UInt(setBits.W))
+  val tags = Vec(3, UInt(tagBits.W))
+  val sets = Vec(3, UInt(setBits.W))
 
   def c_tag = tags(0)
   def b_tag = tags(1)
   def a_tag = tags(2)
-  def g_tag = tags(3) // replRead-Grant
 
   def c_set = sets(0)
   def b_set = sets(1)
   def a_set = sets(2)
-  def g_set = sets(3)
 }
 
 // MSHR exposes signals to MSHRCtl
 class MSHRStatus(implicit p: Parameters) extends L2Bundle with HasChannelBits {
-  val set         = UInt(setBits.W)
-  val reqTag      = UInt(tagBits.W)
-  val metaTag     = UInt(tagBits.W)
-  val needsRepl = Bool()
+  val set = UInt(setBits.W)
+  val tag = UInt(tagBits.W)
+  val way = UInt(wayBits.W)
+  val off = UInt(offsetBits.W)
+  val opcode = UInt(3.W)
+  val param = UInt(3.W)
+  val size = UInt(msgSizeBits.W)
+  val source = UInt(sourceIdBits.W)
+  val alias = aliasBitsOpt.map(_ => UInt(aliasBitsOpt.get.W))
+  val aliasTask = aliasBitsOpt.map(_ => Bool())
+  val nestB = Bool()
+  val needProbeAckData = Bool() // only for B reqs
+  val pbIdx = UInt(mshrBits.W)
   val w_c_resp = Bool()
   val w_d_resp = Bool()
   val w_e_resp = Bool()
+  val fromL2pft = prefetchOpt.map(_ => Bool())
+  val needHint = prefetchOpt.map(_ => Bool())
   val will_free = Bool()
-
-  //  val way = UInt(wayBits.W)
-//  val off = UInt(offsetBits.W)
-//  val opcode = UInt(3.W)
-//  val param = UInt(3.W)
-//  val size = UInt(msgSizeBits.W)
-//  val source = UInt(sourceIdBits.W)
-//  val alias = aliasBitsOpt.map(_ => UInt(aliasBitsOpt.get.W))
-//  val aliasTask = aliasBitsOpt.map(_ => Bool())
-//  val needProbeAckData = Bool() // only for B reqs
-//  val fromL2pft = prefetchOpt.map(_ => Bool())
-//  val needHint = prefetchOpt.map(_ => Bool())
-
   // for TopDown usage
   val reqSource = UInt(MemReqSource.reqSourceBits.W)
   val is_miss = Bool()
@@ -144,29 +135,19 @@ class MSHRRequest(implicit p: Parameters) extends L2Bundle {
   val task = new TaskBundle()
 }
 
-// MSHR info to ReqBuf and SinkB
-class MSHRInfo(implicit p: Parameters) extends L2Bundle {
+// MSHR to ReqBuf for block info
+class MSHRBlockAInfo(implicit p: Parameters) extends L2Bundle {
   val set = UInt(setBits.W)
   val way = UInt(wayBits.W)
   val reqTag = UInt(tagBits.W)
   val willFree = Bool()
 
-  // to block Acquire for to-be-replaced data until Release done (indicated by ReleaseAck received)
+  // to block Acquire for data about to be replaced until Release done
   val needRelease = Bool()
-  // MSHR needs to send ReleaseTask but has not yet sent it
-  // PS: ReleaseTask is also responsible for writing refillData to DS when A miss
-  val releaseNotSent = Bool()
-
   val metaTag = UInt(tagBits.W)
-  val dirHit = Bool()
-
-  // decide whether can nest B (req same-addr) or merge B with release (meta same-addr)
-  val nestB = Bool()
-  val mergeB = Bool()
 
   // to drop duplicate prefetch reqs
   val isAcqOrPrefetch = Bool()
-  val isPrefetch = Bool()
 }
 
 class RespInfoBundle(implicit p: Parameters) extends L2Bundle {
@@ -193,8 +174,8 @@ class FSMState(implicit p: Parameters) extends L2Bundle {
   val s_release = Bool()  // release downwards
   val s_probeack = Bool() // respond probeack downwards
   val s_refill = Bool()   // respond grant upwards
-  val s_merge_probeack = Bool() // respond probeack downwards, Probe merge into A-replacement-Release
-  // val s_grantack = Bool() // respond grantack downwards, moved to GrantBuf
+  // val s_grantack = Bool() // respond grantack downwards
+  // val s_writeback = Bool()// writeback tag/dir
   // val s_triggerprefetch = prefetchOpt.map(_ => Bool())
 
   // wait
@@ -208,7 +189,8 @@ class FSMState(implicit p: Parameters) extends L2Bundle {
   val w_grant = Bool()
   val w_releaseack = Bool()
   val w_grantack = Bool()
-  val w_replResp = Bool()
+
+  val w_release_sent = Bool()
 }
 
 class SourceAReq(implicit p: Parameters) extends L2Bundle {
@@ -219,6 +201,7 @@ class SourceAReq(implicit p: Parameters) extends L2Bundle {
   val param = UInt(aWidth.W)
   val size = UInt(msgSizeBits.W)
   val source = UInt(mshrBits.W)
+  val pbIdx = UInt(mshrBits.W)
   val reqSource = UInt(MemReqSource.reqSourceBits.W)
 }
 
@@ -232,18 +215,29 @@ class SourceBReq(implicit p: Parameters) extends L2Bundle {
 }
 
 class BlockInfo(implicit p: Parameters) extends L2Bundle {
-  val blockG_s1 = Bool()
   val blockA_s1 = Bool()
   val blockB_s1 = Bool()
   val blockC_s1 = Bool()
 }
 
-// used for nested C Release
 class NestedWriteback(implicit p: Parameters) extends L2Bundle {
   val set = UInt(setBits.W)
   val tag = UInt(tagBits.W)
-  val b_set_meta_N = Bool()
+  val b_toN = Bool()
+  val b_toB = Bool()
+  val b_clr_dirty = Bool()
   val c_set_dirty = Bool()
+}
+
+// Put Buffer
+class PutBufferRead(implicit p: Parameters) extends L2Bundle {
+  val idx = UInt(mshrBits.W)
+  val count = UInt(beatBits.W)
+}
+
+class PutBufferEntry(implicit p: Parameters) extends L2Bundle {
+  val data = new DSBeat
+  val mask = UInt(beatBytes.W)
 }
 
 class PrefetchRecv extends Bundle {
@@ -255,4 +249,22 @@ class PrefetchRecv extends Bundle {
 // custom l2 - l1 interface
 class L2ToL1Hint(implicit p: Parameters) extends Bundle {
   val sourceId = UInt(32.W)    // tilelink sourceID
+}
+
+// indicates where the memory access request comes from
+// a dupliacte of this is in xiangShan/package.scala utility/TLUtils/BusKeyField.scala
+object MemReqSource extends Enumeration {
+  val NoWhere = Value("NoWhere")
+
+  val CPUInst = Value("CPUInst")
+  val CPULoadData = Value("CPULoadData")
+  val CPUStoreData = Value("CPUStoreData")
+  val CPUAtomicData = Value("CPUAtomicData")
+  val L1InstPrefetch = Value("L1InstPrefetch")
+  val L1DataPrefetch = Value("L1DataPrefetch")
+  val PTW = Value("PTW")
+  val L2Prefetch = Value("L2Prefetch")
+  val ReqSourceCount = Value("ReqSourceCount")
+
+  val reqSourceBits = log2Ceil(ReqSourceCount.id)
 }

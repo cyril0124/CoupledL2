@@ -44,7 +44,7 @@ class SourceB(implicit p: Parameters) extends L2Module {
   val io = IO(new Bundle() {
     val sourceB = DecoupledIO(new TLBundleB(edgeIn.bundle))
     val task = Flipped(DecoupledIO(new SourceBReq))
-    val grantStatus = Input(Vec(grantBufInflightSize, new GrantStatus))
+    val grantStatus = Input(Vec(sourceIdAll, new GrantStatus))
   })
 
   def toTLBundleB(task: SourceBReq) = {
@@ -78,12 +78,14 @@ class SourceB(implicit p: Parameters) extends L2Module {
   val conflict     = Cat(conflictMask).orR
 
   val noReadyEntry = Wire(Bool())
+  val canFlow      = noReadyEntry && !conflict
+  val flow         = canFlow && io.sourceB.ready
 
   /* ======== Alloc ======== */
-  io.task.ready   := !full
+  io.task.ready   := !full || flow
 
   val insertIdx = PriorityEncoder(probes.map(!_.valid))
-  val alloc     = !full && io.task.valid
+  val alloc     = !full && io.task.valid && !flow
   when(alloc) {
     val p = probes(insertIdx)
     p.valid := true.B
@@ -114,8 +116,10 @@ class SourceB(implicit p: Parameters) extends L2Module {
   }
 
   /* ======== Output ======== */
-  io.sourceB.valid := issueArb.io.out.valid
-  io.sourceB.bits  := toTLBundleB(issueArb.io.out.bits)
+  io.sourceB.valid := issueArb.io.out.valid || (io.task.valid && canFlow)
+  io.sourceB.bits  := toTLBundleB(
+    Mux(canFlow, io.task.bits, issueArb.io.out.bits)
+  )
 
   /* ======== Perf ======== */
   for(i <- 0 until entries){

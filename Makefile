@@ -33,14 +33,6 @@ test-top-l3:
 	mill -i CoupledL2.test.runMain coupledL3.TestTop_L3 -td build
 	mv build/TestTop_L3.v build/TestTop.v
 
-test-top-for-l2-sysn:
-	mill -i CoupledL2.test.runMain coupledL2.TestTop_l2_for_sysn -td build_l2
-	mv build_l2/TestTop_l2_for_sysn.v build_l2/TestTop.v
-
-test-top-for-l3-sysn:
-	mill -i CoupledL2.test.runMain coupledL2.TestTop_L3_for_sysn -td build_l3
-	mv build_l3/TestTop_L3_for_sysn.v build_l3/TestTop.v
-
 clean:
 	rm -rf ./build
 
