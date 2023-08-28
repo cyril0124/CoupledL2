@@ -125,11 +125,8 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   mainPipe.io.bufResp <> sinkC.io.bufResp
   mainPipe.io.toDS.rdata_s5 := dataStorage.io.rdata
   mainPipe.io.toDS.error_s5 := dataStorage.io.error
-  mainPipe.io.refillBufResp_s3.valid := RegNext(mshrBuf.io.r.req.fire, false.B)
-  mainPipe.io.refillBufResp_s3.bits := mshrBuf.io.r.resp.bits
-
-  mainPipe.io.releaseBufResp_s3.valid := RegNext(mshrBuf.io.r.req.fire, false.B)
-  mainPipe.io.releaseBufResp_s3.bits := mshrBuf.io.r.resp.bits
+  mainPipe.io.mshrBufResp_s3.valid := RegNext(mshrBuf.io.r.req.fire, false.B)
+  mainPipe.io.mshrBufResp_s3.bits := mshrBuf.io.r.resp.bits
 
   mainPipe.io.putDataBufResp_s3.valid := RegNext(putDataBuf.io.r.valid, false.B)
   mainPipe.io.putDataBufResp_s3.bits := putDataBuf.io.r.data

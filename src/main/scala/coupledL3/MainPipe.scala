@@ -79,9 +79,8 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
       val putReqGood_s3 = Bool()
     })
 
-    /* get ReleaseBuffer and RefillBuffer read result */
-    val refillBufResp_s3 = Flipped(ValidIO(new MSHRBufReadResp))
-    val releaseBufResp_s3 = Flipped(ValidIO(new MSHRBufReadResp))
+    /* get MSHR buffer read result */
+    val mshrBufResp_s3 = Flipped(ValidIO(new MSHRBufReadResp))
 
     /* get PutDataBuffer read result */
     val putDataBufResp_s3 = Flipped(ValidIO(new DSBlock))
@@ -290,6 +289,12 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   val hasClientHit = clientDirResult_s3.hits.asUInt.orR
   dontTouch(clientDirResult_s3) // TODO: NINE
 
+  val clientDirMetaNotMatch = !Cat(dirResult_s3.meta.clientStates.zipWithIndex.map{
+    case(clientState, i) =>
+      clientState === clientDirResult_s3_1.metas(i).state
+  }).andR
+  assert(!(dirResult_s3.hit && clientDirMetaNotMatch && s3_valid), "clientState not match self clientState, set:%x tag:%x mshrTask:%d sourceId:%d channel:%x", task_s3.bits.set, task_s3.bits.tag, task_s3.bits.mshrTask, task_s3.bits.sourceId, task_s3.bits.channel)
+
   when(s3_fire) { 
     gotClientDirResult_s3 := false.B
   }.elsewhen(RegNext(s2_fire)) {
@@ -472,31 +477,17 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
 
 
   /* ======== Interact with DS ======== */
-  val gotRefillBufResp_s3 = RegInit(false.B)
-  val gotReleaseBufResp_s3 = RegInit(false.B)
-  val refillBufRespReg_s3 = RegInit(0.U.asTypeOf(io.refillBufResp_s3.bits.data))
-  val releaseBufRespReg_s3 = RegInit(0.U.asTypeOf(io.releaseBufResp_s3.bits.data))
+  val gotMSHRBufResp_s3 = RegInit(false.B)
+  val mshrBufRespReg_s3 = RegInit(0.U.asTypeOf(io.mshrBufResp_s3.bits.data))
   when(s3_fire) { 
-    gotRefillBufResp_s3 := false.B
-  }.elsewhen(io.refillBufResp_s3.valid && !gotRefillBufResp_s3) {
-    refillBufRespReg_s3 := io.refillBufResp_s3.bits.data
-    gotRefillBufResp_s3 := true.B
+    gotMSHRBufResp_s3 := false.B
+  }.elsewhen(io.mshrBufResp_s3.valid && !gotMSHRBufResp_s3) {
+    mshrBufRespReg_s3 := io.mshrBufResp_s3.bits.data
+    gotMSHRBufResp_s3 := true.B
   }
 
-  when(s3_fire) { 
-    gotReleaseBufResp_s3 := false.B
-  }.elsewhen(io.releaseBufResp_s3.valid && !gotReleaseBufResp_s3) {
-    releaseBufRespReg_s3 := io.releaseBufResp_s3.bits.data
-    gotReleaseBufResp_s3 := true.B
-  }
-  
-  // val data_s3 = Mux(io.refillBufResp_s3.valid, io.refillBufResp_s3.bits.data, io.releaseBufResp_s3.bits.data)
-  val refillBufData = Mux(gotRefillBufResp_s3, refillBufRespReg_s3, io.refillBufResp_s3.bits.data)
-  val releaseBufData = Mux(gotReleaseBufResp_s3, releaseBufRespReg_s3, io.releaseBufResp_s3.bits.data)
-  val data_s3 = Mux(io.refillBufResp_s3.valid || gotRefillBufResp_s3, 
-                  refillBufData, 
-                  releaseBufData
-                )
+  val mshrBufData = Mux(gotMSHRBufResp_s3, mshrBufRespReg_s3, io.mshrBufResp_s3.bits.data)
+  val data_s3 = mshrBufData
 
   val hasData_s3 = source_req_s3.opcode(0)
   // assert(!(io.refillBufResp_s3.valid && io.releaseBufResp_s3.valid), "can not read both refillBuf and releaseBuf at the same time")
@@ -522,17 +513,14 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     ((~full_wmask & old_data) | (full_wmask & new_data))
   }
 
-  val putOldData_s3 = Mux(io.refillBufResp_s3.valid, io.refillBufResp_s3.bits.data, Mux(io.releaseBufResp_s3.valid, io.releaseBufResp_s3.bits.data, io.putDataBufResp_s3.bits.data)) // TODO: half freq
+  val putOldData_s3 = Mux(gotMSHRBufResp_s3 || io.mshrBufResp_s3.valid, mshrBufData, io.putDataBufResp_s3.bits.data)
   val putPartialData = mergePutData(putOldData_s3, putData_s3, putMask_s3) // TODO: put miss should not use putDataBuf
   val putFullData = putData_s3
-  // val releaseBufData = io.releaseBufResp_s3.bits.data
-  // val refillBufData = io.refillBufResp_s3.bits.data
   val mshrWrData = ParallelPriorityMux(Seq(
                       mshr_putpartial_s3 -> putPartialData,
                       mshr_putfull_s3 -> putFullData,
                       mshr_releaseack_s3 -> bufResp_s3, // only for NINE
-                      req_s3.useProbeData -> releaseBufData,
-                      !req_s3.useProbeData -> refillBufData
+                      (req_s3.useProbeData || !req_s3.useProbeData) -> mshrBufData // TODO:
                     ))
   dontTouch(mshr_putpartial_s3)
   dontTouch(mshr_putfull_s3)
@@ -642,7 +630,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
       when(reqClient === client.U) {
         clientMeta.state := Mux(sink_resp_s3_a_promoteT || req_s3.param === NtoT || req_s3.param === BtoT, TIP, BRANCH)
       }.otherwise{
-        clientMeta.state := clientMetas_s3(client).state
+        clientMeta.state := Mux(clientDirResult_s3.hits(client), clientMetas_s3(client).state, INVALID)
       }
   }
   clientMetaW_s3_c.zipWithIndex.foreach{
@@ -650,7 +638,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
       when(reqClient === client.U) {
         clientMeta.state := INVALID
       }.otherwise{
-        clientMeta.state := clientMetas_s3(client).state
+        clientMeta.state := Mux(clientDirResult_s3.hits(client), clientMetas_s3(client).state, INVALID)
       }
   }
   clientMetaW_s3_mshr := req_s3.clientMeta
