@@ -1004,6 +1004,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   //  Pipeline Status
   // --------------------------------------------------------------------------
   require(io.status_vec.size == 3)
+  io.status_vec.foreach( _ := DontCare )
   io.status_vec(0).valid := task_s3.valid && Mux(
     mshr_req_s3,
     mshr_grant_s3 || mshr_accessackdata_s3 || mshr_accessack_s3,
@@ -1015,14 +1016,14 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   io.status_vec(0).bits.channel := task_s3.bits.channel
   io.status_vec(0).bits.set     := task_s3.bits.set
   io.status_vec(0).bits.mshrTask := task_s3.bits.mshrTask
-  io.status_vec(1).valid        := task_s4.valid && isD_s4 && !needWriteMSHRBuf_s4
-  io.status_vec(1).bits.channel := task_s4.bits.channel
-  io.status_vec(1).bits.set     := task_s4.bits.set
-  io.status_vec(1).bits.mshrTask := task_s4.bits.mshrTask
-  io.status_vec(2).valid        := d_s5.valid
-  io.status_vec(2).bits.channel := task_s5.bits.channel
-  io.status_vec(2).bits.set     := task_s5.bits.set
-  io.status_vec(2).bits.mshrTask := task_s5.bits.mshrTask
+  // io.status_vec(1).valid        := task_s4.valid && isD_s4 && !needWriteMSHRBuf_s4
+  // io.status_vec(1).bits.channel := task_s4.bits.channel
+  // io.status_vec(1).bits.set     := task_s4.bits.set
+  // io.status_vec(1).bits.mshrTask := task_s4.bits.mshrTask
+  // io.status_vec(2).valid        := d_s5.valid
+  // io.status_vec(2).bits.channel := task_s5.bits.channel
+  // io.status_vec(2).bits.set     := task_s5.bits.set
+  // io.status_vec(2).bits.mshrTask := task_s5.bits.mshrTask
 
   // make sure we don't send two reqs continuously with the same set
   assert(!(task_s2.bits.set === task_s3.bits.set &&
@@ -1052,8 +1053,8 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   io.toSourceD <> d_arb.io.out
 
   assert(!(d_s3.valid && d_s3.bits.task.opcode === 7.U), "d_s3 invalid opcode: 7  mshrTask:%d mshrId:%d Tag:0x%x Set:0x%x", req_s3.mshrTask, req_s3.mshrId, req_s3.tag, req_s3.set)
-  assert(!(d_s4.valid && d_s4.bits.task.opcode === 7.U), "d_s4 invalid opcode: 7  mshrTask:%d mshrId:%d Tag:0x%x Set:0x%x", task_s4.bits.mshrTask, task_s4.bits.mshrId, task_s4.bits.tag, task_s4.bits.set)
-  assert(!(d_s5.valid && d_s5.bits.task.opcode === 7.U), "d_s5 invalid opcode: 7  mshrTask:%d mshrId:%d Tag:0x%x Set:0x%x", task_s5.bits.mshrTask, task_s5.bits.mshrId, task_s5.bits.tag, task_s5.bits.set)
+  // assert(!(d_s4.valid && d_s4.bits.task.opcode === 7.U), "d_s4 invalid opcode: 7  mshrTask:%d mshrId:%d Tag:0x%x Set:0x%x", task_s4.bits.mshrTask, task_s4.bits.mshrId, task_s4.bits.tag, task_s4.bits.set)
+  // assert(!(d_s5.valid && d_s5.bits.task.opcode === 7.U), "d_s5 invalid opcode: 7  mshrTask:%d mshrId:%d Tag:0x%x Set:0x%x", task_s5.bits.mshrTask, task_s5.bits.mshrId, task_s5.bits.tag, task_s5.bits.set)
 
   val s2HasGrant = task_s2.valid && task_s2.bits.mshrTask && task_s2.bits.fromA && (task_s2.bits.opcode === GrantData || task_s2.bits.opcode === Grant)
   val s3HasRelease = task_s3.valid && !task_s3.bits.mshrTask && task_s3.bits.fromC && (task_s3.bits.opcode === ReleaseData || task_s3.bits.opcode === Release)

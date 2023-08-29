@@ -154,8 +154,8 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   mshrCtl.io.grantStatus := grantBuf.io.grantStatus
 
   grantBuf.io.d_task <> mainPipe.io.toSourceD
-  grantBuf.io.fromReqArb.status_s1 := reqArb.io.status_s1
-  grantBuf.io.pipeStatusVec := reqArb.io.status_vec ++ mainPipe.io.status_vec
+  // grantBuf.io.fromReqArb.status_s1 := reqArb.io.status_s1
+  // grantBuf.io.pipeStatusVec := reqArb.io.status_vec ++ mainPipe.io.status_vec
   mshrCtl.io.pipeStatusVec(0) := reqArb.io.status_vec(0) // s1 status
   mshrCtl.io.pipeStatusVec(1) := reqArb.io.status_vec(1) // s2 status
   mshrCtl.io.pipeStatusVec(2) := mainPipe.io.status_vec(0) // s3 status
