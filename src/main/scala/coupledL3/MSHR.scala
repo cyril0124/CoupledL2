@@ -1178,7 +1178,7 @@ class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientI
 
   dontTouch(state)
 
-  assert(!(status_reg.valid && timer >= 15000.U), "mshr timeout! cnt:%d id:%d addr:0x%x", timer, io.id, Cat(status_reg.bits.tag, status_reg.bits.set))
+  assert(!(status_reg.valid && timer >= 5000.U), "mshr timeout! cnt:%d id:%d addr:0x%x", timer, io.id, Cat(status_reg.bits.tag, status_reg.bits.set) << 6.U)
 
   /* ======== Performance counters ======== */
   // time stamp

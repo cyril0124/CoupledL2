@@ -293,7 +293,11 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     case(clientState, i) =>
       clientState === clientDirResult_s3_1.metas(i).state
   }).andR
-  assert(!(dirResult_s3.hit && clientDirMetaNotMatch && s3_valid), "clientState not match self clientState, set:%x tag:%x mshrTask:%d sourceId:%d channel:%x", task_s3.bits.set, task_s3.bits.tag, task_s3.bits.mshrTask, task_s3.bits.sourceId, task_s3.bits.channel)
+  val clientHasHit = clientDirResult_s3_1.hits.asUInt.orR
+  assert(!(dirResult_s3.hit && clientHasHit && clientDirMetaNotMatch && s3_valid), 
+          "clientState not match self clientState, set:%x tag:%x mshrTask:%d sourceId:%d channel:%x addr:%x", 
+          task_s3.bits.set, task_s3.bits.tag, task_s3.bits.mshrTask, task_s3.bits.sourceId, task_s3.bits.channel, debug_addr_s3
+        )
 
   when(s3_fire) { 
     gotClientDirResult_s3 := false.B
@@ -728,7 +732,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
 
   io.clientBusyWakeup := DontCare
   val sinkReqWakeUp = !need_mshr_s3 && sink_req_s3 && s3_fire
-  val mshrReqWakeUp = mshr_req_s3 && s3_fire && !(mshr_release_s3 && !req_s3.fromC)
+  val mshrReqWakeUp = mshr_req_s3 && s3_fire && !(mshr_release_s3 && (!req_s3.fromC && !req_s3.fromProbeHelper))
   io.clientBusyWakeup.valid := sinkReqWakeUp || mshrReqWakeUp
   io.clientBusyWakeup.bits.set := Mux(sinkReqWakeUp, clientDirResult_s3.set, task_s3.bits.clientSet)
   io.clientBusyWakeup.bits.way := Mux(sinkReqWakeUp, clientDirResult_s3.way, task_s3.bits.clientWay)
