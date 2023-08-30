@@ -346,7 +346,7 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule {
   io.train.ready := scoreTable.io.req.ready && s0_ready
   io.resp.ready := rrTable.io.w.ready
   io.tlb_req.resp.ready := true.B
-
+  dontTouch(io.tlb_req)
   // different situation
   if(virtualTrain){
     /* s1 send tlb req */

@@ -50,7 +50,9 @@ trait HasCoupledL2Parameters {
                   else cacheParams.clientCaches.head.aliasBitsOpt
   val vaddrBitsOpt = if(cacheParams.clientCaches.isEmpty) Some(39)
                   else cacheParams.clientCaches.head.vaddrBitsOpt
+
   val vaddrBits = 39//vaddrBitsOpt.getOrElse(0)
+
   val pageOffsetBits = log2Ceil(cacheParams.pageBytes)
 
   val bufBlocks = 8 // hold data that flows in MainPipe (4)
@@ -148,6 +150,7 @@ trait HasCoupledL2Parameters {
   }
 
   def getPPN(x: UInt): UInt = {
+    println(x.getWidth,pageOffsetBits)
     x(x.getWidth - 1, pageOffsetBits)
   }
 
@@ -316,6 +319,7 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
           case None =>
         }
         prefetcher.get.io.tlb_req <> io.l2_tlb_req
+        dontTouch(io.l2_tlb_req)
     }
 
     pf_recv_node match {

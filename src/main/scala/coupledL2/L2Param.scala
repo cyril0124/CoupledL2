@@ -38,7 +38,7 @@ case class L1Param
   ways: Int = 8,
   blockBytes: Int = 64,
   aliasBitsOpt: Option[Int] = None,
-  vaddrBitsOpt: Option[Int] = None
+  vaddrBitsOpt: Option[Int] = Some(39)
 ) {
   val capacity = sets * ways * blockBytes
   val setBits = log2Ceil(sets)
