@@ -94,6 +94,8 @@ class TaskBundle(implicit p: Parameters) extends L3Bundle with HasChannelBits wi
 
   // for Dir to choose a way not occupied by some unfinished MSHR task
   val wayMask = UInt(cacheParams.ways.W)
+  // for ClientDir to choose a way not occupied by some unfinished MSHR task
+  val clientWayMask = UInt(clientWays.W)
 
   val reqSource = UInt(MemReqSource.reqSourceBits.W)
 
@@ -158,9 +160,10 @@ class MSHRRequest(implicit p: Parameters) extends L3Bundle {
 }
 
 // MSHR to ReqBuf for block info
-class MSHRBlockAInfo(implicit p: Parameters) extends L3Bundle {
+class MSHRBlockAInfo(implicit p: Parameters) extends L3Bundle with noninclusive.HasClientInfo {
   val set = UInt(setBits.W)
   val way = UInt(wayBits.W)
+  val clientWay = UInt(clientWays.W)
   val reqTag = UInt(tagBits.W)
   val willFree = Bool()
   val isChannelC = Bool() // TODO: block same set channel c task

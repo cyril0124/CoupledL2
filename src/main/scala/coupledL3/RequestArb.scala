@@ -190,6 +190,7 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   io.clientDirRead_s1.valid                       := s1_fire && !mshrTask_s1.valid
   io.clientDirRead_s1.bits.set                    := task_s1.bits.set
   io.clientDirRead_s1.bits.tag                    := task_s1.bits.tag
+  io.clientDirRead_s1.bits.wayMask                := task_s1.bits.clientWayMask
   io.clientDirRead_s1.bits.replacerInfo.opcode    := task_s1.bits.opcode
   io.clientDirRead_s1.bits.replacerInfo.channel   := task_s1.bits.channel
   io.clientDirRead_s1.bits.replacerInfo.reqSource := task_s1.bits.reqSource

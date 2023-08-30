@@ -920,6 +920,7 @@ class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientI
   io.toReqBuf.valid := status_reg.valid
   io.toReqBuf.bits.set := req.set
   io.toReqBuf.bits.way := req.way
+  io.toReqBuf.bits.clientWay := clientDirResult.way
   io.toReqBuf.bits.reqTag := req.tag
   io.toReqBuf.bits.needRelease := !state.w_release_sent
   io.toReqBuf.bits.metaTag := dirResult.tag

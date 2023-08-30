@@ -43,7 +43,7 @@ class TaskStatusSinkC(implicit p: Parameters) extends L3Bundle {
 // (1) For Release/ReleaseData, send it to RequestArb directly
 // (2) For ProbeAck/ProbeAckData, wakeup w_probeack in MSHR
 //     For ProbeAckData, save data into ReleaseBuffer
-class SinkC(implicit p: Parameters) extends L3Module {
+class SinkC(implicit p: Parameters) extends L3Module with noninclusive.HasClientInfo{
   val io = IO(new Bundle() {
     val c = Flipped(DecoupledIO(new TLBundleC(edgeIn.bundle)))
     val toReqArb = DecoupledIO(new TaskBundle) // Release/ReleaseData
@@ -175,6 +175,7 @@ class SinkC(implicit p: Parameters) extends L3Module {
   io.toReqArb.bits := Mux(taskArb.io.out.valid, taskArb.io.out.bits, toTaskBundle(io.c.bits))
   io.toReqArb.bits.bufIdx := Mux(taskArb.io.out.valid, taskArb.io.out.bits.bufIdx, nextPtrReg)
   io.toReqArb.bits.wayMask := ~occWay
+  io.toReqArb.bits.clientWayMask := Fill(clientWays, 1.U)
 
   io.resp := DontCare
   io.resp.valid := io.c.fire && (first || last) && !isRelease

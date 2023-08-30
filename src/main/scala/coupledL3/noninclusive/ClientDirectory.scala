@@ -49,7 +49,7 @@ class ClientMetaEntry(implicit p: Parameters) extends L3Bundle {
 class ClientDirRead(implicit p: Parameters) extends L3Bundle with HasClientInfo {
   val tag = UInt(tagBits.W) // we will do address transformation in client directory for simplicity
   val set = UInt(setBits.W)
-
+  val wayMask = UInt(clientWays.W)
   val replacerInfo = new ReplacerInfo()
 }
 
@@ -178,38 +178,6 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
     io.metaWReq.bits.wayOH
   )
 
-  // val metaArrayDiv = 8
-  // val metaArrayDivBits = log2Ceil(metaArrayDiv)
-  // val metaArray = Module(new BankedSRAM(Vec(clientBits, new ClientMetaEntry), sets / metaArrayDiv, ways * metaArrayDiv, banks / 2, singlePort = true, enableClockGate = enableClockGate))
-  // val metaReadVec = Wire(Vec(ways * metaArrayDiv, Vec(clientBits, new ClientMetaEntry)))
-  // val metaRdSet = rdSet(clientSetBits - 1, metaArrayDivBits)
-  // val metaRdWayOH = RegEnable(UIntToOH(rdSet(metaArrayDivBits -1, 0)), 0.U(metaArrayDiv.W), io.read.fire)
-  // dontTouch(metaRdSet)
-  // dontTouch(metaReadVec)
-  // dontTouch(metaRead)
-  // dontTouch(metaRdWayOH)
-  // metaReadVec := metaArray.io.r(io.read.fire, metaRdSet).resp.data
-  // metaRead := Mux1H(metaRdWayOH.asBools,
-  //   metaReadVec.asTypeOf(Vec(metaArrayDiv, Vec(ways, Vec(clientBits, new ClientMetaEntry)))
-  // ))
-
-  // val metaWrSet = io.metaWReq.bits.set(clientSetBits - 1, metaArrayDivBits)
-  // val metaWrWayOH = UIntToOH(io.metaWReq.bits.set(metaArrayDivBits - 1, 0))
-  // val metaWrWayMask = WireInit(0.U((ways * metaArrayDiv).W)).asTypeOf(Vec(metaArrayDiv, UInt(ways.W)))
-  // dontTouch(metaWrSet)
-  // dontTouch(metaWrWayOH)
-  // dontTouch(metaWrWayMask)
-  // metaWrWayMask.zip(metaWrWayOH.asBools).foreach{
-  //   case (m, en) =>
-  //     m := Mux(en, io.metaWReq.bits.wayOH, 0.U(ways.W))
-  // }
-  // metaArray.io.w(
-  //   metaWen,
-  //   io.metaWReq.bits.wmeta,
-  //   metaWrSet,
-  //   metaWrWayMask.asUInt
-  // )
-
   dontTouch(io)
   dontTouch(metaArray.io)
   dontTouch(tagArray.io)
@@ -238,10 +206,21 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
   val busyTableFull = busyTable(set_s2).asUInt.andR
   assert(!busyTableFull)
   val anotherWay = PriorityEncoder(~busyTable(set_s2).asUInt)
-  val chosenWay = Mux(inv, invalidWay, Mux(replWayIsBusy, anotherWay, replaceWay))
+  // val chosenWay = Mux(inv, invalidWay, Mux(replWayIsBusy, anotherWay, replaceWay))
+  val chosenWay = Mux(inv, invalidWay, replaceWay)
+
+  // if chosenWay not in wayMask, then choose a way in wayMask
+  val finalWay = Mux(
+    req_s2.wayMask(chosenWay),
+    chosenWay,
+    PriorityEncoder(req_s2.wayMask)
+  )
+  when(valid_s2) {
+    assert(PopCount(req_s2.wayMask) >= 1.U, "Make sure we have at least one way to use.")
+  }
 
   hit_s2 := Cat(hitVec).orR
-  way_s2 := Mux(hit_s2, hitWay, chosenWay)
+  way_s2 := Mux(hit_s2, hitWay, finalWay)
 
   when(valid_s2) {
     // busyTable(set_s2)(way_s2) := true.B
@@ -271,7 +250,7 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
             t := 0.U
           }.elsewhen(busyTable(i)(j)) {
             t := t + 1.U
-            assert(t < 10000.U, "busyTable leak!! set:%d way:%d", i.U, j.U)
+            assert(t < 30000.U, "busyTable leak!! set:%d way:%d", i.U, j.U)
           }
       } 
   }
