@@ -88,7 +88,7 @@ case class L3Param
   clientCaches: Seq[CacheParameters] = Nil,
   replacement: String = "plru",
   mshrs: Int = 16,
-  grantQueueEntries: Int = 8,
+  grantQueueEntries: Int = 16,
   enableClockGate: Boolean = true,
   dataEccCode: Option[String] = Some("secded"), // Option: "none", "identity", "parity", "sec", "secded"
   
