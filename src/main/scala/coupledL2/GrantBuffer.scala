@@ -163,15 +163,19 @@ abstract class BaseGrantBuffer(implicit p: Parameters) extends L2Module {
   val noSpaceForMSHRReq = PopCount(Cat(VecInit(io.pipeStatusVec.map { case s =>
     s.valid && s.bits.fromA
   }).asUInt, block_valids)) >= mshrsAll.U
+  // TODO: only block mp_grant and acuqire
+  val noSpaceForWaitSinkE = PopCount(Cat(VecInit(io.pipeStatusVec.tail.map { case s =>
+    s.valid && s.bits.fromA
+  }).asUInt, Cat(inflight_grant.map(_.valid)).asUInt)) >= (grantBufInflightSize-1).U
 
-  io.toReqArb.blockSinkReqEntrance.blockA_s1 := noSpaceForSinkReq
+  io.toReqArb.blockSinkReqEntrance.blockA_s1 := noSpaceForSinkReq || noSpaceForWaitSinkE
   io.toReqArb.blockSinkReqEntrance.blockB_s1 := Cat(inflight_grant.map(g => g.valid &&
     g.bits.set === io.fromReqArb.status_s1.b_set && g.bits.tag === io.fromReqArb.status_s1.b_tag)).orR
   //TODO: or should we still Stall B req?
   // A-replace related rprobe is handled in SourceB
   io.toReqArb.blockSinkReqEntrance.blockC_s1 := noSpaceForSinkReq
   io.toReqArb.blockSinkReqEntrance.blockG_s1 := false.B
-  io.toReqArb.blockMSHRReqEntrance := noSpaceForMSHRReq
+  io.toReqArb.blockMSHRReqEntrance := noSpaceForMSHRReq || noSpaceForWaitSinkE
 
   // =========== XSPerf ===========
   if (cacheParams.enablePerf) {
