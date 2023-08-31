@@ -163,7 +163,7 @@ class MSHRRequest(implicit p: Parameters) extends L3Bundle {
 class MSHRBlockAInfo(implicit p: Parameters) extends L3Bundle with noninclusive.HasClientInfo {
   val set = UInt(setBits.W)
   val way = UInt(wayBits.W)
-  val clientWay = UInt(clientWays.W)
+  val clientWay = UInt(clientWayBits.W)
   val reqTag = UInt(tagBits.W)
   val willFree = Bool()
   val isChannelC = Bool() // TODO: block same set channel c task

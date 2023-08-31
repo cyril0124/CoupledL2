@@ -219,7 +219,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
       val willFreeMask = VecInit(io.mshrStatus.map(s => s.valid && s.bits.willFree)).asUInt
       waitMSUpdate  := e.waitMS & (~willFreeMask).asUInt
       occWaysUpdate := e.occWays & (~willFreeWays(e.task)).asUInt
-      occClientWaysUpdate := e.occClientWays & (~willFreeClientWays(e.task)).asUInt
+      occClientWaysUpdate := occClientWays(e.task) // e.occClientWays & (~willFreeClientWays(e.task)).asUInt
       e.waitMP  := PriorityMux(Seq(
         e.waitMP(1) -> (e.waitMP >> pipeFlow_s3.asUInt),
         e.waitMP(2) -> (e.waitMP >> pipeFlow_s2.asUInt)
