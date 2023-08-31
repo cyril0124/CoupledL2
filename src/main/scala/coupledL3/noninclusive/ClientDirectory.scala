@@ -206,8 +206,8 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
   val busyTableFull = busyTable(set_s2).asUInt.andR
   assert(!busyTableFull)
   val anotherWay = PriorityEncoder(~busyTable(set_s2).asUInt)
-  // val chosenWay = Mux(inv, invalidWay, Mux(replWayIsBusy, anotherWay, replaceWay))
-  val chosenWay = Mux(inv, invalidWay, replaceWay)
+  val chosenWay = Mux(inv, invalidWay, Mux(replWayIsBusy, anotherWay, replaceWay))
+  // val chosenWay = Mux(inv, invalidWay, replaceWay)
 
   // if chosenWay not in wayMask, then choose a way in wayMask
   val finalWay = Mux(
@@ -222,15 +222,17 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
   hit_s2 := Cat(hitVec).orR
   way_s2 := Mux(hit_s2, hitWay, finalWay)
 
-  when(valid_s2) {
+  val wakeupSet = io.busyWakeup.bits.set
+  val wakeupWay = io.busyWakeup.bits.way
+  val wakeupConflict = valid_s2 && set_s2 === wakeupSet && way_s2 === wakeupWay && busyTable(wakeupSet)(wakeupWay) && !hit_s2
+
+  when(valid_s2 && !wakeupConflict) {
     // busyTable(set_s2)(way_s2) := true.B
     busyTableCnts(set_s2)(way_s2) := busyTableCnts(set_s2)(way_s2) + 1.U
   }
 
-  when(io.busyWakeup.fire) {
-    val wakeupSet = io.busyWakeup.bits.set
-    val wakeupWay = io.busyWakeup.bits.way
-    assert(!(valid_s2 && set_s2 === wakeupSet && way_s2 === wakeupWay && busyTable(wakeupSet)(wakeupWay) && !hit_s2), "set:%d way:%d hit:%d", set_s2, way_s2, hit_s2)
+  when(io.busyWakeup.fire && !wakeupConflict) {
+    // assert(!(valid_s2 && set_s2 === wakeupSet && way_s2 === wakeupWay && busyTable(wakeupSet)(wakeupWay) && !hit_s2), "set:%d way:%d hit:%d", set_s2, way_s2, hit_s2)
     // assert(!(io.busyWakeup.fire && !busyTable(wakeupSet)(wakeupWay)), "trying to write a not busy entry of busyTable set:%d way:%d", wakeupSet, wakeupWay)
 
     // busyTable(wakeupSet)(wakeupWay) := false.B

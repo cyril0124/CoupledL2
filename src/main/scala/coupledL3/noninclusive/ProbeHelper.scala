@@ -7,7 +7,7 @@ import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._
 
-class ProbeHelper(entries: Int = 5, enqDelay: Int = 1)(implicit p: Parameters) extends L3Module {
+class ProbeHelper(entries: Int = 5, enqDelay: Int = 1)(implicit p: Parameters) extends L3Module with noninclusive.HasClientInfo {
   val io = IO(new Bundle() {
     val clientDirResult = Flipped(Valid(new ClientDirResult()))
     val task = DecoupledIO(new TaskBundle)
@@ -42,6 +42,7 @@ class ProbeHelper(entries: Int = 5, enqDelay: Int = 1)(implicit p: Parameters) e
   probeTask.alias.foreach(_ := 0.U)
   probeTask.needProbeAckData := true.B
   probeTask.wayMask := Fill(cacheParams.ways, "b1".U)
+  probeTask.clientWayMask := Fill(clientWays, 1.U)
   probeTask.dirty := false.B // ignored
 
   val metaOccupied = dir.metas.zip(dir.hits).map { case (s, hit) => !hit && s.state =/= MetaData.INVALID }

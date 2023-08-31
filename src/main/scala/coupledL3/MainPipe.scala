@@ -209,6 +209,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   )
   // s3_fire := s3_valid && s4_ready
   s3_fire := s3_valid && s5_ready // TODO:
+  // s3_fire := s3_valid && (s4_ready && !req_drop_s3 || req_drop_s3)
   when(s2_fire) {
     s3_full := true.B 
   }.elsewhen(s3_fire) {
@@ -506,7 +507,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   val need_data_on_miss_c = c_need_replacement
   val need_data_b = sinkB_req_s3 && dirResult_s3.hit &&
     (meta_s3.state === TRUNK || meta_s3.state === TIP && meta_s3.dirty || req_s3.needProbeAckData)
-  val ren = Mux(dirResult_s3.hit, need_data_on_hit_a, need_data_on_miss_a || need_data_on_miss_c) || need_data_b || task_s3.bits.selfHasData && mshr_req_s3
+  val ren = Mux(mshr_req_s3, task_s3.bits.selfHasData, Mux(dirResult_s3.hit, need_data_on_hit_a, need_data_on_miss_a || need_data_on_miss_c) || need_data_b)
   val bufResp_s3 = io.bufResp.data.asUInt
   val putBufResp_s3 = RegNext(io.putBufResp) // for Put from A-channel // TODO: half freq
   val putData_s3 = VecInit(putBufResp_s3.map(_.data)).asUInt // only for putFull data
@@ -970,19 +971,28 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     s.set === s1_set && (if(allTask) true.B else !s.mshrTask) && (if(tag) s.tag === s1_tag else true.B)
   }
 
-  io.toReqBuf(0) := task_s2.valid && pipelineBlock('a', task_s2.bits, allTask = true)
-  io.toReqBuf(1) := task_s3.valid && pipelineBlock('a', task_s3.bits)
+  // io.toReqBuf(0) := task_s2.valid && pipelineBlock('a', task_s2.bits, allTask = true)
+  // io.toReqBuf(1) := task_s3.valid && pipelineBlock('a', task_s3.bits)
+
+  io.toReqBuf(0) := task_s2.valid && (
+                    pipelineBlock('a', task_s2.bits, allTask = true) 
+                    || io.fromReqArb.status_s1.a_tag(clientSetBits-1, 0) === task_s2.bits.set(clientSetBits-1, 0)
+                  )
+  io.toReqBuf(1) := task_s3.valid && (
+                    pipelineBlock('a', task_s3.bits) 
+                    || io.fromReqArb.status_s1.a_tag(clientSetBits-1, 0) === task_s2.bits.set(clientSetBits-1, 0) && !task_s2.bits.mshrTask
+                  )
 
   val stage3IsBlocked = s3_full && !s3_fire
   val fromReqBufSinkA_valid = WireInit(false.B)
   val fromReqBufSinkA_set = WireInit(0.U.asTypeOf(task_s2.bits.set))
   val fromReqBufSinkA_blockFromS2 = fromReqBufSinkA_valid && task_s2.valid && (
-      fromReqBufSinkA_set === task_s2.bits.set || 
-      fromReqBufSinkA_set(clientSetBits-1, 0) === task_s2.bits.set(clientSetBits-1, 0) && task_s2.bits.fromC
+      fromReqBufSinkA_set === task_s2.bits.set 
+      || fromReqBufSinkA_set(clientSetBits-1, 0) === task_s2.bits.set(clientSetBits-1, 0) && task_s2.bits.fromC
   )
   val fromReqBufSinkA_blockFromS3 = fromReqBufSinkA_valid && task_s3.valid && (
-      fromReqBufSinkA_set === task_s3.bits.set || 
-      fromReqBufSinkA_set(clientSetBits-1, 0) === task_s3.bits.set(clientSetBits-1, 0) && task_s3.bits.fromC
+      fromReqBufSinkA_set === task_s3.bits.set 
+      || fromReqBufSinkA_set(clientSetBits-1, 0) === task_s3.bits.set(clientSetBits-1, 0) && task_s3.bits.fromC
   )
   fromReqBufSinkA_valid := io.fromReqBufSinkA.valid
   fromReqBufSinkA_set := io.fromReqBufSinkA.set
@@ -997,6 +1007,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     task_s4.valid && pipelineBlock('b', task_s4.bits, tag = true)     ||
     task_s5.valid && pipelineBlock('b', task_s5.bits, tag = true)
   io.toReqArb.blockA_s1 := io.toReqBuf(0) || io.toReqBuf(1) || fromReqBufSinkA_blockFromS2 || fromReqBufSinkA_blockFromS3
+  // io.toReqArb.blockA_s1 := fromReqBufSinkA_blockFromS2 || fromReqBufSinkA_blockFromS3
 
 
 

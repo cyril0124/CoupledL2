@@ -114,8 +114,8 @@ class MSHRCtl(implicit p: Parameters) extends L3Module with noninclusive.HasClie
 
   val s2s3PipeStatusVec = VecInit(Seq(io.pipeStatusVec(1), io.pipeStatusVec(2)))
   // val pipeReqCount = PopCount(Cat(io.pipeStatusVec.map(_.valid))) // TODO: consider add !mshrTask to optimize
-  // val pipeReqCount = PopCount(Cat(s2s3PipeStatusVec.map(status => status.valid && !status.bits.mshrTask))) // TODO: consider add !mshrTask to optimize
-  val pipeReqCount = PopCount(Cat(s2s3PipeStatusVec.map(status => status.valid))) // TODO: consider add !mshrTask to optimize
+  val pipeReqCount = PopCount(Cat(s2s3PipeStatusVec.map(status => status.valid && !status.bits.mshrTask))) // TODO: consider add !mshrTask to optimize
+  // val pipeReqCount = PopCount(Cat(s2s3PipeStatusVec.map(status => status.valid))) // TODO: consider add !mshrTask to optimize
   val mshrCount = PopCount(Cat(mshrs.map(_.io.status.valid)))
   val mshrFull = pipeReqCount + mshrCount >= mshrsAll.U
   val b_mshrFull = pipeReqCount + mshrCount >= (mshrsAll-1).U
@@ -195,10 +195,10 @@ class MSHRCtl(implicit p: Parameters) extends L3Module with noninclusive.HasClie
   val setMatchVec_c = mshrs.map(m => m.io.status.valid && m.io.status.bits.set === io.fromReqArb.status_s1.c_set)
   val setConflictVec_c = (setMatchVec_c zip mshrs.map(_.io.status.bits.nestC)).map(x => x._1 && !x._2)
   
-  val clientSetMatch_a = mshrs.map(m => m.io.status.valid && m.io.status.bits.fromC && io.fromReqBufSinkA.valid && m.io.status.bits.set(clientSetBits - 1, 0) === io.fromReqBufSinkA.set(clientSetBits - 1, 0))
-  io.toReqArb.blockC_s1 := mshrFull || Cat(setConflictVec_c).orR || !hasEmptyWay
+  // val clientSetMatch_a = mshrs.map(m => m.io.status.valid && m.io.status.bits.fromC && io.fromReqBufSinkA.valid && m.io.status.bits.set(clientSetBits - 1, 0) === io.fromReqBufSinkA.set(clientSetBits - 1, 0))
+  io.toReqArb.blockC_s1 := mshrFull || Cat(setConflictVec_c).orR //|| !hasEmptyWay
   io.toReqArb.blockB_s1 := b_mshrFull || Cat(setConflictVec_b).orR
-  io.toReqArb.blockA_s1 := a_mshrFull || Cat(clientSetMatch_a).orR // conflict logic moved to ReqBuf
+  io.toReqArb.blockA_s1 := a_mshrFull //|| Cat(clientSetMatch_a).orR // conflict logic moved to ReqBuf
 
   /* Acquire downwards */
   val acquireUnit = Module(new AcquireUnit())

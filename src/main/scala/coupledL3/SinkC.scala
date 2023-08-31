@@ -169,8 +169,9 @@ class SinkC(implicit p: Parameters) extends L3Module with noninclusive.HasClient
     occWay
   }
   val occWay = Mux(taskArb.io.out.valid, getOccWayVec(true.B, taskArb.io.out.bits.set), getOccWayVec(true.B, parseAddress(io.c.bits.address)._2))
+  val hasFreeWay = !Cat(occWay).andR
 
-
+  // io.toReqArb.valid := ( cValid || taskArb.io.out.valid ) && hasFreeWay
   io.toReqArb.valid := cValid || taskArb.io.out.valid
   io.toReqArb.bits := Mux(taskArb.io.out.valid, taskArb.io.out.bits, toTaskBundle(io.c.bits))
   io.toReqArb.bits.bufIdx := Mux(taskArb.io.out.valid, taskArb.io.out.bits.bufIdx, nextPtrReg)
