@@ -34,7 +34,7 @@ class MSHRBufRead(implicit p: Parameters) extends L2Bundle {
 
 // write with beat granularity
 class MSHRBufWrite(implicit p: Parameters) extends L2Bundle {
-  val valid = Input(Bool())
+  val valid_dups = Input(Vec(mshrsAll, Bool()))
   val beat_sel = Input(UInt(beatSize.W))
   val data = Input(new DSBlock)
   val id = Input(UInt(mshrBits.W))
@@ -55,7 +55,7 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L2Module {
 
   io.w.foreach {
     case w =>
-      when (w.valid) {
+      when (w.valid_dups.reduce(_||_)) {
         w.beat_sel.asBools.zipWithIndex.foreach {
           case (sel, i) =>
             when (sel) { valids(w.id)(i) := true.B }
@@ -73,7 +73,7 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L2Module {
 
   buffer.zipWithIndex.foreach {
     case (block, i) =>
-      val wens = VecInit(io.w.map(w => w.valid && w.id === i.U)).asUInt
+      val wens = VecInit(io.w.map(w => w.valid_dups(i) && w.id === i.U)).asUInt
       assert(PopCount(wens) <= 2.U, "triple write to the same MSHR buffer entry")
 
       val w_beat_sel = PriorityMux(wens, io.w.map(_.beat_sel))

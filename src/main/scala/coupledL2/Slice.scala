@@ -114,7 +114,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
   // priority: nested-ReleaseData / probeAckData [NEW] > mainPipe DS rdata [OLD]
   // 0/1 might happen at the same cycle with 2
-  releaseBuf.io.w(0).valid := mshrCtl.io.nestedwbDataId.valid
+  releaseBuf.io.w(0).valid_dups.foreach(_ := mshrCtl.io.nestedwbDataId.valid)
   releaseBuf.io.w(0).beat_sel := Fill(beatSize, 1.U(1.W))
   releaseBuf.io.w(0).data := mainPipe.io.nestedwbData
   releaseBuf.io.w(0).id := mshrCtl.io.nestedwbDataId.bits

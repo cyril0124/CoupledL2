@@ -155,7 +155,7 @@ class SinkC(implicit p: Parameters) extends L2Module {
   io.resp.respInfo.dirty := io.c.bits.opcode(0)
   io.resp.respInfo.isHit := io.c.bits.opcode(0)
 
-  io.releaseBufWrite.valid := io.c.valid && io.c.bits.opcode === ProbeAckData
+  io.releaseBufWrite.valid_dups.foreach(_ := io.c.valid && io.c.bits.opcode === ProbeAckData)
   io.releaseBufWrite.beat_sel := UIntToOH(beat)
   io.releaseBufWrite.data.data := Fill(beatSize, io.c.bits.data)
   io.releaseBufWrite.id := 0.U(mshrBits.W) // id is given by MSHRCtl by comparing address to the MSHRs
@@ -172,7 +172,7 @@ class SinkC(implicit p: Parameters) extends L2Module {
   // since what we are trying to prevent is that C-Release comes first and MSHR-Release comes later
   // we can make sure this refillBufWrite can be read by MSHR-Release
   // TODO: this is rarely triggered, consider just blocking?
-  io.refillBufWrite.valid := RegNext(io.task.fire && io.task.bits.opcode === ReleaseData && newdataMask.orR, false.B)
+  io.refillBufWrite.valid_dups.foreach(_ := RegNext(io.task.fire && io.task.bits.opcode === ReleaseData && newdataMask.orR, false.B))
   io.refillBufWrite.beat_sel := Fill(beatSize, 1.U(1.W))
   io.refillBufWrite.id := RegNext(OHToUInt(newdataMask))
   io.refillBufWrite.data.data := dataBuf(RegNext(io.task.bits.bufIdx)).asUInt

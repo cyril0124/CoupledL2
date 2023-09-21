@@ -485,18 +485,20 @@ class MainPipe(implicit p: Parameters) extends L2Module {
 
   /* ======== Stage 5 ======== */
   val task_s5 = RegInit(0.U.asTypeOf(Valid(new TaskBundle())))
+  val task_s5_dups_valid = RegInit(VecInit(Seq.fill(4)(false.B)))
   val ren_s5 = RegInit(false.B)
   val data_s5 = Reg(UInt((blockBytes * 8).W))
-  val need_write_releaseBuf_s5 = RegInit(false.B)
-  val need_write_refillBuf_s5 = RegInit(false.B)
+  val need_write_releaseBuf_s5_dups = RegInit(VecInit(Seq.fill(mshrsAll)(false.B)))
+  val need_write_refillBuf_s5_dups = RegInit(VecInit(Seq.fill(mshrsAll)(false.B)))
   val isC_s5, isD_s5 = RegInit(false.B)
-  task_s5.valid := task_s4.valid && !req_drop_s4
+//  task_s5.valid := task_s4.valid && !req_drop_s4
+  task_s5_dups_valid.foreach(_ := task_s4.valid && !req_drop_s4)
   when (task_s4.valid && !req_drop_s4) {
     task_s5.bits := task_s4.bits
     ren_s5 := ren_s4
     data_s5 := data_s4
-    need_write_releaseBuf_s5 := need_write_releaseBuf_s4
-    need_write_refillBuf_s5 := need_write_refillBuf_s4
+    need_write_releaseBuf_s5_dups.foreach(_ := need_write_releaseBuf_s4)
+    need_write_refillBuf_s5_dups.foreach(_ := need_write_refillBuf_s4)
     isC_s5 := isC_s4 || task_s4.bits.fromB && !task_s4.bits.mshrTask && task_s4.bits.opcode === ProbeAckData
     isD_s5 := isD_s4 || task_s4.bits.fromA && !task_s4.bits.mshrTask &&
       (task_s4.bits.opcode === GrantData || task_s4.bits.opcode === AccessAckData)
@@ -527,19 +529,25 @@ class MainPipe(implicit p: Parameters) extends L2Module {
 
   customL1Hint.io.l1Hint <> io.l1Hint
 
-  io.releaseBufWrite.valid      := task_s5.valid && need_write_releaseBuf_s5
+  io.releaseBufWrite.valid_dups.zipWithIndex.foreach{
+    case (valid, i) =>
+      valid := task_s5_dups_valid(0) && need_write_releaseBuf_s5_dups(i)
+  }
   io.releaseBufWrite.beat_sel   := Fill(beatSize, 1.U(1.W))
   io.releaseBufWrite.data.data  := rdata_s5
   io.releaseBufWrite.id         := task_s5.bits.mshrId
-  assert(!(io.releaseBufWrite.valid && !io.releaseBufWrite.ready), "releaseBuf should be ready when given valid")
+  assert(!(io.releaseBufWrite.valid_dups.reduce(_||_) && !io.releaseBufWrite.ready), "releaseBuf should be ready when given valid")
 
-  io.refillBufWrite.valid     := task_s5.valid && need_write_refillBuf_s5
+  io.refillBufWrite.valid_dups.zipWithIndex.foreach{
+    case (valid, i) =>
+      valid := task_s5_dups_valid(1) && need_write_refillBuf_s5_dups(i)
+  }
   io.refillBufWrite.beat_sel  := Fill(beatSize, 1.U(1.W))
   io.refillBufWrite.data.data := rdata_s5
   io.refillBufWrite.id        := task_s5.bits.mshrId
-  assert(!(io.refillBufWrite.valid && !io.refillBufWrite.ready), "refillBuf should be ready when given valid")
+  assert(!(io.refillBufWrite.valid_dups.reduce(_||_) && !io.refillBufWrite.ready), "refillBuf should be ready when given valid")
 
-  val c_d_valid_s5 = task_s5.valid && !RegNext(chnl_fire_s4, false.B) && !RegNextN(chnl_fire_s3, 2, Some(false.B))
+  val c_d_valid_s5 = task_s5_dups_valid(2) && !RegNext(chnl_fire_s4, false.B) && !RegNextN(chnl_fire_s3, 2, Some(false.B))
   c_s5.valid := c_d_valid_s5 && isC_s5
   d_s5.valid := c_d_valid_s5 && isD_s5
   c_s5.bits.task := task_s5.bits
@@ -577,7 +585,7 @@ class MainPipe(implicit p: Parameters) extends L2Module {
     task_s2.valid && bBlock(task_s2.bits) ||
     task_s3.valid && bBlock(task_s3.bits) ||
     task_s4.valid && bBlock(task_s4.bits, tag = true) ||
-    task_s5.valid && bBlock(task_s5.bits, tag = true)
+    task_s5_dups_valid(3) && bBlock(task_s5.bits, tag = true)
 
   io.toReqArb.blockA_s1 := io.toReqBuf(0) || io.toReqBuf(1)
 
