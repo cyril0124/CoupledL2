@@ -49,7 +49,7 @@ class DataStorage(implicit p: Parameters) extends L2Module {
     val error = Output(Bool()) // TODO: ECC
   })
 
-  val array  = Module(new BankedSRAM(new DSBlock, blocks, 1, cacheParams.dsNBanks, singlePort = false, bypassWrite = true, enableClockGate = enableClockGate))
+  val array  = Module(new BankedSRAM(new DSBlock, blocks, 1, cacheParams.dsNBanks, singlePort = true, enableClockGate = enableClockGate))
 
   // read
   val arrayIdx = Cat(io.req.bits.way, io.req.bits.set)
@@ -65,10 +65,7 @@ class DataStorage(implicit p: Parameters) extends L2Module {
 
   val wrSameTime = ren && wen
   dontTouch(wrSameTime)
-  when(wrSameTime){
-    printf("Wraning: write and read same time\n")
-    printf("wReq_set:%d wReq_way:%d rReq_set:%d rReq_way:%d\n", wReqReg.bits.set, wReqReg.bits.way, io.req.bits.set, io.req.bits.way)
-  }
+  assert(!wrSameTime, "Wraning: write and read same time, wReq_set:%d wReq_way:%d rReq_set:%d rReq_way:%d\n", wReqReg.bits.set, wReqReg.bits.way, io.req.bits.set, io.req.bits.way)
 
   // Seperate the whole block of data into several banksECC, each bank contains 8 bytes(64-bit).
   // For every bank, we attach ECC protection bits.
