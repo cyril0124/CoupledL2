@@ -23,7 +23,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.diplomacy.{BundleBridgeSink,BundleBridgeSource, LazyModule, LazyModuleImp}
 import coupledL2._
-import utility.Pipeline
+import utility.{RegNextN,Pipeline}
 import huancun.PrefetchRecv
 
 // TODO: PrefetchReceiver is temporarily used since L1&L2 do not support Hint.
@@ -79,23 +79,30 @@ class SppSenderNull(val clientNum:Int=2)(implicit p: Parameters) extends LazyMod
 // spp sender/receiver xbar
  class PrefetchReceiverXbar(val clientNum:Int=2)(implicit p: Parameters) extends LazyModule{
    val inNode = Seq.fill(clientNum)(BundleBridgeSink(Some(() => new coupledL2.LlcPrefetchRecv)))
-   val outNode = Seq.fill(1)(BundleBridgeSource(Some(() => new huancun.LlcPrefetchRecv)))
+   val outNode = Seq.fill(1)(BundleBridgeSource(Some(() => new huancun.PrefetchRecv)))
    lazy val module = new LazyModuleImp(this){
-     val arbiter = Module(new Arbiter(new LlcPrefetchRecv, clientNum))
+     val arbiter = Module(new RRArbiter(new LlcPrefetchRecv, clientNum))
      arbiter.suggestName(s"pf_l3recv_node_arb")
      for (i <- 0 until clientNum) {
-       arbiter.io.in(i).valid := inNode(i).in.head._1.addr_valid
-       arbiter.io.in(i).bits.addr_valid := inNode(i).in.head._1.addr_valid
-       arbiter.io.in(i).bits.addr       := inNode(i).in.head._1.addr
-       arbiter.io.in(i).bits.needT      := inNode(i).in.head._1.needT
-       arbiter.io.in(i).bits.source      := inNode(i).in.head._1.source
+      val s0_valid = inNode(i).in.head._1.addr_valid
+      val s0_req = inNode(i).in.head._1
+      val s1_valid = RegNextN(s0_valid,1)
+      val s1_req = RegEnable(s0_req,s0_valid)
+       arbiter.io.in(i).valid           := s1_valid
+       arbiter.io.in(i).bits.addr_valid := s1_req.addr_valid
+       arbiter.io.in(i).bits.addr       := s1_req.addr
+       arbiter.io.in(i).bits.needT      := s1_req.needT
+       arbiter.io.in(i).bits.source     := s1_req.source
        arbiter.io.in(i).ready := DontCare
      }
      arbiter.io.out.valid := DontCare
-     outNode.head.out.head._1.addr_valid := arbiter.io.out.bits.addr_valid
-     outNode.head.out.head._1.addr       := arbiter.io.out.bits.addr
-     outNode.head.out.head._1.needT      := arbiter.io.out.bits.needT
-     outNode.head.out.head._1.source     := arbiter.io.out.bits.source
+     val delayPipe = Module(new Pipeline(new LlcPrefetchRecv, 1))
+     delayPipe.io.in <> arbiter.io.out
+
+     outNode.head.out.head._1.addr_valid := delayPipe.io.out.valid
+     outNode.head.out.head._1.addr       := delayPipe.io.out.bits.addr
+     outNode.head.out.head._1.l2_pf_en   := true.B
      arbiter.io.out.ready := true.B
+     delayPipe.io.out.ready := true.B
    }
  }
