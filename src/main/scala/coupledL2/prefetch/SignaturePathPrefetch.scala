@@ -160,8 +160,8 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   // stage 0
   // --------------------------------------------------------------------------------
   // read sTable
+  val rValid_s0 = io.req.valid //todo: has bug here
   val rAddr_s0  = io.req.bits.pageAddr
-  val rValid_s0 = io.req.fire
   sTable.io.r.req.valid       := rValid_s0
   sTable.io.r.req.bits.setIdx := idx(rAddr_s0)
   val accessedPage_s1  = RegEnable(io.req.bits.pageAddr,  0.U(pageAddrBits.W),    rValid_s0)
@@ -640,7 +640,7 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
           when(lookCount <= 1.U) {
             val testOffset = s1_current.block + 1.U
             when(testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === s1_current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)) {
-              enprefetchnl := false.B
+              enprefetchnl := true.B
             }
           }
           lookCount := 0.U
