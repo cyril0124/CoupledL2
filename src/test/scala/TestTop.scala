@@ -19,6 +19,7 @@ import scala.collection.mutable.ArrayBuffer
 import xs.utils.GTimer
 import xs.utils.perf.{DebugOptions,DebugOptionsKey}
 import huancun.{HuanCun, HCCacheParameters, HCCacheParamsKey, CacheParameters, CacheCtrl}
+import coupledL2.utils.HasPerfEvents
 
 class TestTop_L2()(implicit p: Parameters) extends LazyModule {
 
@@ -636,7 +637,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       TLDelayer(delayFactor) :=*
       l3.node :=* l2xbar
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) with HasPerfEvents{
     master_nodes.zipWithIndex.foreach {
       case (node, i) =>
         node.makeIOs()(ValName(s"master_port_$i"))
@@ -661,6 +662,9 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     val timer = GTimer()
 
     logTimestamp := timer
+
+    val perfEvents = (l2List.map(_.module)).flatMap(_.getPerfEvents)
+    generatePerfEvent()
   }
 }
 

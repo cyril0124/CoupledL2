@@ -25,8 +25,9 @@ import freechips.rocketchip.tilelink.TLMessages._
 import org.chipsalliance.cde.config.Parameters
 import coupledL2.MetaData.isParamFromT
 import xs.utils.perf.HasPerfLogging
+import coupledL2.utils.HasPerfEvents
 
-class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging{
+class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging with HasPerfEvents{
   val io = IO(new Bundle() {
     /* receive incoming tasks */
     val sinkA    = Flipped(DecoupledIO(new TaskBundle))
@@ -234,4 +235,8 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging{
   XSPerfAccumulate("sinkA_stall_by_mshrTask", io.sinkA.valid && mshr_task_s1.valid)
   XSPerfAccumulate("sinkB_stall_by_mshrTask", io.sinkB.valid && mshr_task_s1.valid)
   XSPerfAccumulate("sinkC_stall_by_mshrTask", io.sinkC.valid && mshr_task_s1.valid)
+
+  // TODO: perfEvents
+  val perfEvents = Seq()
+  generatePerfEvent()
 }
