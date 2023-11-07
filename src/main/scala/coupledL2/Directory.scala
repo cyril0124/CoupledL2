@@ -90,7 +90,7 @@ class ReplacerResult(implicit p: Parameters) extends L2Bundle {
   val retry = Bool()
 }
 
-class MetaWrite(implicit p: Parameters) extends L2Bundle {
+class MetaWrite(implicit p: Parameters) extends L2Bundle with HasChannelBits{
   val set = UInt(setBits.W)
   val wayOH = UInt(cacheParams.ways.W)
   val wmeta = new MetaEntry
@@ -341,4 +341,6 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
 
   XSPerfAccumulate("dirRead_cnt", io.read.fire)
   XSPerfAccumulate("choose_busy_way", reqValid_s3 && !req_s3.wayMask(chosenWay))
+  XSPerfAccumulate("dirWrite_all",io.metaWReq.valid && io.metaWReq.bits.fromA)
+  XSPerfAccumulate("dirWrite_fromPrefetch",io.metaWReq.valid && io.metaWReq.bits.fromA && io.metaWReq.bits.wmeta.prefetch.get)
 }

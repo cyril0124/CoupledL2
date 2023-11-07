@@ -756,6 +756,7 @@ class SignaturePathPrefetch(parentName:String="Unkown")(implicit p: Parameters) 
   })
 
   val sTable = Module(new SignatureTable(parentName + "stable_"))
+  // val pTable = Module(new PatternTable(parentName + "ptableOld_"))
   val pTable = Module(new PatternTableTiming(parentName + "ptable_"))
   val unpack = Module(new Unpack)
 

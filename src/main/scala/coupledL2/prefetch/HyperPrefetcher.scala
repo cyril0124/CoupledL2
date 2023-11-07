@@ -160,7 +160,7 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
   })))
 
   val q_sms = Module(new Queue(chiselTypeOf(sms.io.req.bits), 4, flow = true, pipe = false))
-  val q_spp = Module(new Queue(chiselTypeOf(spp.io.req.bits), 8, flow = false, pipe = false))
+  val q_spp = Module(new Queue(chiselTypeOf(spp.io.req.bits), 256, flow = false, pipe = false))
   q_sms.io.enq <> sms.io.req
   q_sms.io.deq.ready := !bop.io.req.valid
 
@@ -177,7 +177,7 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
     train_for_bop := io.train.bits
     train_for_bop_valid := true.B
   }
-  bop.io.train.valid := (io.train.valid && io.train.bits.state === AccessState.MISS) || train_for_bop_valid
+  bop.io.train.valid := (io.train.valid)|| train_for_bop_valid
   bop.io.train.bits := Mux(io.train.valid, io.train.bits, train_for_bop)
   when(bop.io.train.fire && !io.train.valid) {
     train_for_bop_valid := false.B
