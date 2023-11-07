@@ -247,8 +247,8 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
     case _ => None //Spp not exist, can not use multl-level refill
   }
 
-  lazy val module = new Impl
-  class Impl extends LazyModuleImp(this) with HasPerfLogging with HasPerfEvents{
+  lazy val module = new CoupledL2Impl
+  class CoupledL2Impl extends LazyModuleImp(this) with HasPerfLogging with HasPerfEvents{
     val banks = node.in.size
     val bankBits = if (banks == 1) 0 else log2Up(banks)
     val io = IO(new Bundle {
@@ -517,7 +517,12 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
     XSPerfAccumulate("grant_data_fire", PopCount(VecInit(grant_fire)))
 
     // TODO: perfEvents
-    val perfEvents = slices.flatMap(_.getPerfEvents)
+    val allPerfEvents = slices.flatMap(_.getPerfEvents)
+    for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
+      println(cacheParams.name+" perfEvents Set ", name, inc, i)
+    }
+    println(cacheParams.name+" perfEvents All: "+cacheParams.getPCntAll)
+    val perfEvents = allPerfEvents
     generatePerfEvent()
   }
 

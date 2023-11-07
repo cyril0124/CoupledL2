@@ -61,12 +61,15 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val taskBuf = Reg(Vec(bufBlocks, new TaskBundle))
   val taskValids = RegInit(VecInit(Seq.fill(bufBlocks)(false.B)))
   val taskArb = Module(new RRArbiter(new TaskBundle, bufBlocks))
-  val bufValids = taskValids.asUInt | dataValids
+  val outPipe = Queue(taskArb.io.out, entries = 1, pipe = true, flow = false) // for timing: taskArb <> outPipe
+  val outPipeValids = UIntToOH(outPipe.bits.bufIdx)
+  val bufValids = taskValids.asUInt | dataValids | Mux(outPipe.valid ,outPipeValids, 0.U)
+  dontTouch(outPipeValids)
 
   val full = bufValids.andR
   val noSpace = full && hasData
   val nextPtr = PriorityEncoder(~bufValids)
-  val nextPtrReg = RegEnable(nextPtr, 0.U.asTypeOf(nextPtr), io.c.fire && isRelease && first && hasData)
+  val nextPtrReg = RegEnable(nextPtr, 0.U.asTypeOf(nextPtr), io.c.fire && isRelease && first && hasData) // if c has data, c has two beat, must latch one beat
 
   def toTaskBundle(c: TLBundleC): TaskBundle = {
     val task = Wire(new TaskBundle)
@@ -116,7 +119,7 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
     }
   }
 
-  when (io.c.fire && isRelease && last && (!io.task.ready || taskArb.io.out.valid)) {
+  when (io.c.fire && isRelease && last && (!io.task.ready || outPipe.valid)) { // (!io.task.ready || taskArb.io.out.valid) === in_c
     when (hasData) {
       taskValids(nextPtrReg) := true.B
       taskBuf(nextPtrReg) := toTaskBundle(io.c.bits)
@@ -128,7 +131,6 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
     }
   }
 
-  taskArb.io.out.ready := io.task.ready
   taskArb.io.in.zipWithIndex.foreach {
     case (in, i) =>
       in.valid := taskValids(i)
@@ -142,10 +144,15 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
     beatValids(io.bufRead.bits.bufIdx).foreach(_ := false.B)
   }
 
+  outPipe.ready := true.B // always receive output from taskArb to ensure that no deadlocks occur
+  when(outPipe.valid && !io.task.fire){
+    taskValids.zipWithIndex.foreach{case(tValid, i) => when(i.U === outPipe.bits.bufIdx){tValid := true.B}}
+  }
+
   val cValid = io.c.valid && isRelease && last
-  io.task.valid := cValid || taskArb.io.out.valid
-  io.task.bits := Mux(taskArb.io.out.valid, taskArb.io.out.bits, toTaskBundle(io.c.bits))
-  io.task.bits.bufIdx := Mux(taskArb.io.out.valid, taskArb.io.out.bits.bufIdx, nextPtrReg)
+  io.task.valid := cValid || outPipe.valid
+  io.task.bits := Mux(outPipe.valid, outPipe.bits, toTaskBundle(io.c.bits))
+  io.task.bits.bufIdx := Mux(outPipe.valid, outPipe.bits.bufIdx, nextPtrReg)
 
   io.resp.valid := io.c.valid && (first || last) && !isRelease
   io.resp.mshrId := 0.U // DontCare
@@ -179,7 +186,7 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
   io.refillBufWrite.id := RegNext(OHToUInt(newdataMask))
   io.refillBufWrite.data.data := dataBuf(RegNext(io.task.bits.bufIdx)).asUInt
 
-  io.c.ready := !isRelease || !first || !full || !hasData && io.task.ready && !taskArb.io.out.valid
+  io.c.ready := !isRelease || !first || !full || !hasData && io.task.ready && !outPipe.valid
 
   io.bufResp.data := dataBuf(io.bufRead.bits.bufIdx)
 

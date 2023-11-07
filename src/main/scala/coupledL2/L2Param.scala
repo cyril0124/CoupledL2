@@ -110,6 +110,10 @@ case class L2Param
   hasMbist: Boolean = false,
   hasShareBus: Boolean = false,
 
+  // Numbers of Performance Counter in <xxx submodule>
+  numPCntMP: Int = 11,
+  numPCntReqArb: Int = 0,
+
   hartIds: Seq[Int] = Seq[Int](),
   // Prefetch
   prefetch: Option[PrefetchParameters] = None,
@@ -131,6 +135,8 @@ case class L2Param
     blockGranularity = log2Ceil(sets),
     blockBytes = blockBytes
   )
+
+  def getPCntAll: Int = numPCntMP + numPCntReqArb
 }
 
 case object EdgeInKey extends Field[TLEdgeIn]

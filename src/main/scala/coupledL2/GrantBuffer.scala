@@ -256,25 +256,30 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   // count the number of valid blocks + those in pipe that might use GrantBuf
   // so that GrantBuffer will not exceed capacity
   // TODO: we can still allow pft_resps (HintAck) to enter mainpipe
+  val toReqArb = WireInit(0.U.asTypeOf((io.toReqArb)))
+  val latency = 1.U
+
   val noSpaceForSinkReq = PopCount(VecInit(io.pipeStatusVec.tail.map { case s =>
     s.valid && (s.bits.fromA || s.bits.fromC)
-  }).asUInt) + grantQueueCnt >= mshrsAll.U
+  }).asUInt) + grantQueueCnt >= mshrsAll.U - latency
   val noSpaceForMSHRReq = PopCount(VecInit(io.pipeStatusVec.map { case s =>
     s.valid && s.bits.fromA
-  }).asUInt) + grantQueueCnt >= mshrsAll.U
+  }).asUInt) + grantQueueCnt >= mshrsAll.U - latency
   // TODO: only block mp_grant and acuqire
   val noSpaceForWaitSinkE = PopCount(Cat(VecInit(io.pipeStatusVec.tail.map { case s =>
     s.valid && s.bits.fromA
-  }).asUInt, Cat(inflightGrant.map(_.valid)).asUInt)) >= (grantBufInflightSize-1).U
+  }).asUInt, Cat(inflight_grant.map(_.valid)).asUInt)) >= (grantBufInflightSize-1).U - latency
 
-  io.toReqArb.blockSinkReqEntrance.blockA_s1 := noSpaceForSinkReq || noSpaceForWaitSinkE // TODO: noSpaceForSinkPft.getOrElse(false.B)
-  io.toReqArb.blockSinkReqEntrance.blockB_s1 := Cat(inflightGrant.map(g => g.valid &&
+  toReqArb.blockSinkReqEntrance.blockA_s1 := noSpaceForSinkReq || noSpaceForWaitSinkE
+  toReqArb.blockSinkReqEntrance.blockB_s1 := Cat(inflight_grant.map(g => g.valid &&
     g.bits.set === io.fromReqArb.status_s1.b_set && g.bits.tag === io.fromReqArb.status_s1.b_tag)).orR
   //TODO: or should we still Stall B req?
   // A-replace related rprobe is handled in SourceB
-  io.toReqArb.blockSinkReqEntrance.blockC_s1 := noSpaceForSinkReq
-  io.toReqArb.blockSinkReqEntrance.blockG_s1 := false.B
-  io.toReqArb.blockMSHRReqEntrance := noSpaceForMSHRReq || noSpaceForWaitSinkE
+  toReqArb.blockSinkReqEntrance.blockC_s1 := noSpaceForSinkReq
+  toReqArb.blockSinkReqEntrance.blockG_s1 := false.B
+  toReqArb.blockMSHRReqEntrance := noSpaceForMSHRReq || noSpaceForWaitSinkE
+
+  io.toReqArb := RegNext(toReqArb)
 
   // =========== generating Hint to L1 ===========
   // TODO: the following keeps the exact same logic as before, but it needs serious optimization

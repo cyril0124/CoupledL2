@@ -33,7 +33,7 @@ class BankedSRAM[T <: Data]
   val w_setIdx = io.w.req.bits.setIdx.head(innerSetBits)
   val w_bankSel = if(n == 1) 0.U else io.w.req.bits.setIdx(bankBits - 1, 0)
 
-  val (banks, pls) = (0 until n).map{ i =>
+  val banks = (0 until n).map{ i =>
     val ren = if(n == 1) true.B else i.U === r_bankSel
     val wen = if(n == 1) true.B else i.U === w_bankSel
     val sram = Module(new SRAMTemplate(
@@ -46,17 +46,17 @@ class BankedSRAM[T <: Data]
       hasClkGate = enableClockGate,
       parentName = parentName + s"bank${i}_"
     ))
-    val mbistPl = MBISTPipeline.PlaceMbistPipeline(1,
-      s"${parentName}_bank${i}_mbistPipe",
-      hasMbist && hasShareBus
-    )
     sram.io.r.req.valid := io.r.req.valid && ren
     sram.io.r.req.bits.apply(r_setIdx)
     sram.io.w.req.valid := io.w.req.valid && wen
     sram.io.w.req.bits.apply(io.w.req.bits.data, w_setIdx, io.w.req.bits.waymask.getOrElse(1.U))
-    (sram, mbistPl)
-  }.unzip
+    sram
+  }
 
+  val mbistPl = MBISTPipeline.PlaceMbistPipeline(1,
+    s"${parentName}_mbistPipe",
+    hasMbist && hasShareBus
+  )
 
   // resp data sel
   val ren_sel_0 = UIntToOH(r_bankSel)

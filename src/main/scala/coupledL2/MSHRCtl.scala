@@ -98,8 +98,8 @@ class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
 
   val pipeReqCount = PopCount(Cat(io.pipeStatusVec.map(_.valid))) // TODO: consider add !mshrTask to optimize
   val mshrCount = PopCount(Cat(mshrs.map(_.io.status.valid)))
-  val mshrFull = pipeReqCount + mshrCount >= mshrsAll.U
-  val a_mshrFull = pipeReqCount + mshrCount >= (mshrsAll-1).U // the last idle mshr should not be allocated for channel A req
+  val mshrWillUse = pipeReqCount + mshrCount
+  dontTouch(mshrWillUse)
   val mshrSelector = Module(new MSHRSelector())
   mshrSelector.io.idle := mshrs.map(m => !m.io.status.valid)
   val selectedMSHROH = mshrSelector.io.out.bits
@@ -134,10 +134,15 @@ class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
       m.io.bMergeTask.bits := io.bMergeTask.bits
   }
 
-  io.toReqArb.blockC_s1 := false.B
-  io.toReqArb.blockB_s1 := mshrFull   // conflict logic in SinkB
-  io.toReqArb.blockA_s1 := a_mshrFull // conflict logic in ReqBuf
-  io.toReqArb.blockG_s1 := false.B
+  val latency = 1 // stall latency cycle for timing
+  val toReqArb = WireInit(0.U.asTypeOf((io.toReqArb)))
+  toReqArb.blockC_s1 := false.B
+  toReqArb.blockB_s1 := Mux(!io.toReqArb.blockB_s1, mshrWillUse >= (mshrsAll-latency).U, mshrWillUse >= mshrsAll.U)
+  toReqArb.blockA_s1 := Mux(!io.toReqArb.blockB_s1, mshrWillUse >= (mshrsAll-1-latency).U, mshrWillUse >= (mshrsAll-latency).U) // the last idle mshr should not be allocated for channel A req
+  toReqArb.blockG_s1 := false.B
+
+  io.toReqArb := RegNext(toReqArb)
+
 
   /* Acquire downwards */
   val acquireUnit = Module(new AcquireUnit())
@@ -175,8 +180,8 @@ class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
     }
   )
   // Performance counters
-  XSPerfAccumulate("capacity_conflict_to_sinkA", a_mshrFull)
-  XSPerfAccumulate("capacity_conflict_to_sinkB", mshrFull)
+  XSPerfAccumulate("capacity_conflict_to_sinkA", io.toReqArb.blockA_s1)
+  XSPerfAccumulate("capacity_conflict_to_sinkB", io.toReqArb.blockB_s1)
   XSPerfHistogram("mshr_alloc", io.toMainPipe.mshr_alloc_ptr,
     enable = io.fromMainPipe.mshr_alloc_s3.valid,
     start = 0, stop = mshrsAll, step = 1)
