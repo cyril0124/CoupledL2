@@ -112,6 +112,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     val prefetchEvict = if(prefetchOpt.isDefined){
       prefetchOpt.get match{
         case hyper: HyperPrefetchParams => Some(DecoupledIO(new PrefetchEvict))
+        case hyper2: prefetch.intel_spp.PrefetchBranchV2Params => Some(DecoupledIO(new PrefetchEvict))
         case _ => None
       }
     } else {

@@ -228,6 +228,7 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
  val pf_recv_node: Option[BundleBridgeSink[PrefetchRecv]] = prefetchOpt match {
   case Some(receive: PrefetchReceiverParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
   case Some(sms_sender_hyper: HyperPrefetchParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
+  case Some(sms_sender_hyper: intel_spp.PrefetchBranchV2Params) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
   case _ => None
 }
 
@@ -297,6 +298,8 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
     val prefetchEvicts = prefetchOpt.map({
       case hyper : HyperPrefetchParams =>
         Some( Wire(Vec(banks, DecoupledIO(new PrefetchEvict()(pftParams)))))
+      case hyper2 : intel_spp.PrefetchBranchV2Params =>
+        Some( Wire(Vec(banks, DecoupledIO(new PrefetchEvict()(pftParams)))))
       case _ => None
     })
     val prefetchReqsReady = WireInit(VecInit(Seq.fill(banks)(false.B)))
@@ -307,7 +310,7 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
         fastArb(prefetchResps.get, prefetcher.get.io.resp, Some("prefetch_resp"))
         prefetchEvicts.foreach({
           case Some(evict_wire) => 
-            fastArb(evict_wire, prefetcher.get.io.evict.get, Some("prefetch_evict"))
+            fastArb(evict_wire, prefetcher.get.io.evict, Some("prefetch_evict"))
           case None =>
         })
     }
@@ -400,7 +403,7 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
             prefetchResps.get(i) <> resp
             prefetchEvicts.foreach({
                   case Some(evict_wire) => 
-                    val s_evict = Pipeline(s.evict.get)
+                    val s_evict = Pipeline(s.evict)
                     evict_wire(i) <> s_evict
                     if(bankBits != 0){
                       val evict_full_addr = Cat(

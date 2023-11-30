@@ -152,9 +152,7 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
     sinkA.io.prefetchReq.get <> pfio.req
     pfio.resp <> grantBuf.io.prefetchResp.get
     pfio.recv_addr := 0.U.asTypeOf(ValidIO(UInt(64.W)))
-    if(pfio.evict.isDefined){
-      pfio.evict.get <> mainPipe.io.prefetchEvict.get
-    }
+    pfio.evict <> mainPipe.io.prefetchEvict.get
   }
 
   /* input & output signals */
