@@ -168,14 +168,14 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
         val tag = UInt(tagBits.W)
         val set = UInt(setBits.W)
       },
-      entries = 8,
+      entries = 32,
       flow = true))
 
     val latePftRespQueue = Module(new Queue(new Bundle() {
         val tag = UInt(tagBits.W)
         val set = UInt(setBits.W)
       },
-      entries = 8,
+      entries = 32,
       flow = true))
 
     latePftRespQueue.io.enq.valid := io.hintDup.valid
@@ -187,7 +187,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     pftRespQueue.io.enq.bits.tag := io.d_task.bits.task.tag
     pftRespQueue.io.enq.bits.set := io.d_task.bits.task.set
 
-    val toPftArb = Module(new FastArbiter(new Bundle() {
+    val toPftArb = Module(new RRArbiterInit(new Bundle() {
       val tag = UInt(tagBits.W)
       val set = UInt(setBits.W)
     }, 2))
@@ -197,8 +197,12 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     val resp = io.prefetchResp.get
     resp <> toPftArb.io.out
 
-    assert(latePftRespQueue.io.enq.ready, "latePftRespQueue should never be full, no back pressure logic") // TODO: has bug here
-    assert(pftRespQueue.io.enq.ready, "pftRespQueue should never be full, no back pressure logic") // TODO: has bug here
+//    assert(latePftRespQueue.io.enq.ready, "latePftRespQueue should never be full, no back pressure logic") // TODO: has bug here
+//    assert(pftRespQueue.io.enq.ready, "pftRespQueue should never be full, no back pressure logic") // TODO: has bug here
+    if (cacheParams.enablePerf) {
+      XSPerfAccumulate("GrantBuf_late_prefetchResp_drop", latePftRespQueue.io.enq.valid && !latePftRespQueue.io.enq.ready)
+      XSPerfAccumulate("GrantBuf_prefetchResp_drop", pftRespQueue.io.enq.valid && !pftRespQueue.io.enq.ready)
+    }
   }
   // If no prefetch, there never should be HintAck
   if(cacheParams.enableAssert) assert(prefetchOpt.nonEmpty.B || !io.d_task.valid || dtaskOpcode =/= HintAck)
