@@ -30,6 +30,7 @@ class MSHRBufRead(implicit p: Parameters) extends L2Bundle {
   val id = Input(UInt(mshrBits.W))
   val ready = Output(Bool())
   val data = Output(new DSBlock)
+  val corrupt = Output(Bool())
 }
 
 // write with beat granularity
@@ -38,6 +39,7 @@ class MSHRBufWrite(implicit p: Parameters) extends L2Bundle {
   val beat_sel = Input(UInt(beatSize.W))
   val data = Input(new DSBlock)
   val id = Input(UInt(mshrBits.W))
+  val corrupt = Input(Bool())
   val ready = Output(Bool())
 }
 
@@ -64,32 +66,17 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L2Module {
   }
 
   when (io.r.valid) {
-    // TODO: When the acquireperm is sent and grant is received, refillBuf does not contain data.
-    //  Therefore, refill buffer should be blocked from being read.
-
-    // assert(valids(io.r.id).asUInt.andR, "[%d] attempt to read an invalid entry", io.r.id)
     valids(io.r.id).foreach(_ := false.B)
   }
 
   buffer.zipWithIndex.foreach {
     case (block, i) =>
       val wens = VecInit(io.w.map(w => w.valid_dups(i) && w.id === i.U)).asUInt
-      assert(PopCount(wens) <= 2.U, "triple write to the same MSHR buffer entry")
+      if(cacheParams.enableAssert)  assert(PopCount(wens) <= 2.U, "triple write to the same MSHR buffer entry")
 
       val w_beat_sel = PriorityMux(wens, io.w.map(_.beat_sel))
       val w_data = PriorityMux(wens, io.w.map(_.data))
       val ren = io.r.valid && io.r.id === i.U
-      // block.zipWithIndex.foreach {
-      //   case (entry, j) =>
-      //     entry.io.w.req.valid := wens.orR && w_beat_sel(j)
-      //     entry.io.w.req.bits.apply(
-      //       data = w_data.data((j + 1) * beatBytes * 8 - 1, j * beatBytes * 8).asTypeOf(new DSBeat),
-      //       setIdx = 0.U,
-      //       waymask = 1.U
-      //     )
-      //     entry.io.r.req.valid := ren
-      //     entry.io.r.req.bits.apply(0.U)
-      // }
       block.zipWithIndex.foreach {
         case (entry, j) =>
           when(wens.orR && w_beat_sel(j)) {
@@ -101,9 +88,24 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L2Module {
   io.r.ready := true.B
   io.w.foreach(_.ready := true.B)
 
-  val ridReg = RegNext(io.r.id, 0.U.asTypeOf(io.r.id))
-  // io.r.data.data := VecInit(buffer.map {
-  //   case block => VecInit(block.map(_.io.r.resp.data.asUInt)).asUInt
-  // })(ridReg)
   io.r.data.data := RegNext(buffer(io.r.id).asUInt)
+
+  if(dataEccEnable) {
+    val corrupts = RegInit(VecInit.tabulate(mshrsAll, beatSize)((_, _) => false.B))
+
+    corrupts.zipWithIndex.foreach{ case(beats, i) => 
+      val wens_corrupt = VecInit(io.w.map(w => w.valid_dups(i) && w.id === i.U)).asUInt
+
+      val w_corrupt = PriorityMux(wens_corrupt, io.w.map(_.corrupt))
+      require(beats.getWidth == beatSize, s"${beats.getWidth} =/= ${beatSize}")
+      
+      when(wens_corrupt.orR) {
+        beats.foreach( _ := w_corrupt )
+      }
+    }
+
+    io.r.corrupt := RegNext(corrupts(io.r.id).reduce(_||_))
+  } else {
+    io.r.corrupt := false.B
+  }
 }

@@ -179,6 +179,10 @@ class MSHR(implicit p: Parameters) extends L2Module {
     ob
   }
   val mp_release, mp_probeack, mp_merge_probeack, mp_grant = Wire(new TaskBundle)
+  mp_release.corrupt := false.B
+  mp_probeack.corrupt := false.B
+  mp_merge_probeack.corrupt := false.B
+  mp_grant.corrupt := false.B
   val mp_release_task = {
     mp_release.channel := req.channel
     mp_release.tag := dirResult_tag_dups(1)
@@ -583,10 +587,13 @@ class MSHR(implicit p: Parameters) extends L2Module {
   io.msInfo.bits.mergeB := mergeB
   io.msInfo.bits.isAcqOrPrefetch := req_acquire || req_prefetch
   io.msInfo.bits.isPrefetch := req_prefetch
+  io.msInfo.bits.channel := req.channel
 
-  assert(!(c_resp.valid && !io.status.bits.w_c_resp))
-  assert(!(d_resp.valid && !io.status.bits.w_d_resp))
-  assert(!(e_resp.valid && !io.status.bits.w_e_resp))
+  if(cacheParams.enableAssert) {
+    assert(!(c_resp.valid && !io.status.bits.w_c_resp))
+    assert(!(d_resp.valid && !io.status.bits.w_d_resp))
+    assert(!(e_resp.valid && !io.status.bits.w_e_resp))
+  }
 
   /* ======== Handling Nested B ======== */
   when (io.bMergeTask.valid) {
@@ -607,7 +614,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     when(io.nestedwb.b_set_meta_N && dirResult.hit && meta.state =/= INVALID){
       dirResult.hit := false.B
       state_dups.foreach(_.w_replResp := false.B)
-      assert(meta.state =/= TIP)
+      if(cacheParams.enableAssert) assert(meta.state =/= TIP)
     }
   }
 

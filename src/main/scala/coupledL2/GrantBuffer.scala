@@ -78,9 +78,10 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     // to block sourceB from sending same-addr probe until GrantAck received
     val grantStatus = Output(Vec(grantBufInflightSize, new GrantStatus))
 
-    // generate hint signal for L1
-    val l1Hint = ValidIO(new L2ToL1Hint())
-    val globalCounter = Output(UInt((log2Ceil(mshrsAll) + 1).W))
+    val hintDup = Flipped(ValidIO(new Bundle() {
+      val tag = Input(UInt(tagBits.W))
+      val set = Input(UInt(setBits.W))
+    }))
   })
 
   // =========== functions ===========
@@ -95,7 +96,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
      d.sink := td.task.mshrId
      d.denied := false.B
      d.data := data(0).asUInt
-     d.corrupt := false.B
+     d.corrupt := td.task.corrupt
      d.echo.lift(DirtyKey).foreach(_ := td.task.dirty)
      beat1 := data(1)
 
@@ -129,7 +130,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
 
   val grantQueueCnt = grantQueue.io.count
   val full = !grantQueue.io.enq.ready
-  assert(!(full && io.d_task.valid), "GrantBuf full and RECEIVE new task, back pressure failed")
+  if(cacheParams.enableAssert) assert(!(full && io.d_task.valid), "GrantBuf full and RECEIVE new task, back pressure failed")
 
   // =========== dequeue entry and fire ===========
   require(beatSize == 2)
@@ -167,24 +168,44 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
         val tag = UInt(tagBits.W)
         val set = UInt(setBits.W)
       },
-      entries = 4,
+      entries = 32,
       flow = true))
+
+    val latePftRespQueue = Module(new Queue(new Bundle() {
+        val tag = UInt(tagBits.W)
+        val set = UInt(setBits.W)
+      },
+      entries = 32,
+      flow = true))
+
+    latePftRespQueue.io.enq.valid := io.hintDup.valid
+    latePftRespQueue.io.enq.bits.tag := io.hintDup.bits.tag
+    latePftRespQueue.io.enq.bits.set := io.hintDup.bits.set
 
     pftRespQueue.io.enq.valid := io.d_task.valid && dtaskOpcode === HintAck &&
       io.d_task.bits.task.fromL2pft.getOrElse(false.B)
     pftRespQueue.io.enq.bits.tag := io.d_task.bits.task.tag
     pftRespQueue.io.enq.bits.set := io.d_task.bits.task.set
 
-    val resp = io.prefetchResp.get
-    resp.valid := pftRespQueue.io.deq.valid
-    resp.bits.tag := pftRespQueue.io.deq.bits.tag
-    resp.bits.set := pftRespQueue.io.deq.bits.set
-    pftRespQueue.io.deq.ready := resp.ready
+    val toPftArb = Module(new RRArbiterInit(new Bundle() {
+      val tag = UInt(tagBits.W)
+      val set = UInt(setBits.W)
+    }, 2))
+    toPftArb.io.in(0) <> pftRespQueue.io.deq
+    toPftArb.io.in(1) <> latePftRespQueue.io.deq
 
-    // assert(pftRespQueue.io.enq.ready, "pftRespQueue should never be full, no back pressure logic") // TODO: has bug here
+    val resp = io.prefetchResp.get
+    resp <> toPftArb.io.out
+
+//    assert(latePftRespQueue.io.enq.ready, "latePftRespQueue should never be full, no back pressure logic") // TODO: has bug here
+//    assert(pftRespQueue.io.enq.ready, "pftRespQueue should never be full, no back pressure logic") // TODO: has bug here
+    if (cacheParams.enablePerf) {
+      XSPerfAccumulate("GrantBuf_late_prefetchResp_drop", latePftRespQueue.io.enq.valid && !latePftRespQueue.io.enq.ready)
+      XSPerfAccumulate("GrantBuf_prefetchResp_drop", pftRespQueue.io.enq.valid && !pftRespQueue.io.enq.ready)
+    }
   }
   // If no prefetch, there never should be HintAck
-  assert(prefetchOpt.nonEmpty.B || !io.d_task.valid || dtaskOpcode =/= HintAck)
+  if(cacheParams.enableAssert) assert(prefetchOpt.nonEmpty.B || !io.d_task.valid || dtaskOpcode =/= HintAck)
 
   // =========== record unreceived GrantAck ===========
   // Addrs with Grant sent and GrantAck not received
@@ -201,7 +222,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     entry.bits.sink   := io.d_task.bits.task.mshrId
   }
   val inflight_full = Cat(inflight_grant.map(_.valid)).andR
-  assert(!inflight_full, "inflight_grant entries should not be full")
+  if(cacheParams.enableAssert) assert(!inflight_full, "inflight_grant entries should not be full")
 
   // report status to SourceB to block same-addr Probe
   io.grantStatus zip inflight_grant foreach {
@@ -214,7 +235,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   when (io.e.fire) {
     // compare sink to clear buffer
     val sinkMatchVec = inflight_grant.map(g => g.valid && g.bits.sink === io.e.bits.sink)
-    assert(PopCount(sinkMatchVec) === 1.U, "GrantBuf: there must be one and only one match")
+    if(cacheParams.enableAssert) assert(PopCount(sinkMatchVec) === 1.U, "GrantBuf: there must be one and only one match")
     val bufIdx = OHToUInt(sinkMatchVec)
     inflight_grant(bufIdx).valid := false.B
   }
@@ -260,40 +281,6 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
 
   io.toReqArb := RegNext(toReqArb)
 
-  // =========== generating Hint to L1 ===========
-  // TODO: the following keeps the exact same logic as before, but it needs serious optimization
-  val hintQueue = Module(new Queue(UInt(sourceIdBits.W), entries = mshrsAll))
-  // Total number of beats left to send in GrantBuf
-  // [This is better]
-  // val globalCounter = (grantQueue.io.count << 1.U).asUInt + grantBufValid.asUInt // entries * 2 + grantBufValid
-  val globalCounter = RegInit(0.U((log2Ceil(grantBufSize) + 1).W))
-  when(io.d_task.fire) {
-    val hasData = io.d_task.bits.task.opcode(0)
-    when(hasData) {
-      globalCounter := globalCounter + 1.U // counter = counter + 2 - 1
-    }.otherwise {
-      globalCounter := globalCounter // counter = counter + 1 - 1
-    }
-  }.otherwise {
-    globalCounter := Mux(globalCounter === 0.U, 0.U, globalCounter - 1.U) // counter = counter - 1
-  }
-
-  // if globalCounter >= 3, it means the hint that should be sent is in GrantBuf
-  when(globalCounter >= 3.U) {
-    hintQueue.io.enq.valid := true.B
-    hintQueue.io.enq.bits := io.d_task.bits.task.sourceId
-  }.otherwise {
-    hintQueue.io.enq.valid := false.B
-    hintQueue.io.enq.bits := 0.U(sourceIdBits.W)
-  }
-  hintQueue.io.deq.ready := true.B
-
-  // tell CustomL1Hint about the delay in GrantBuf
-  io.globalCounter := globalCounter
-
-  io.l1Hint.valid := hintQueue.io.deq.valid
-  io.l1Hint.bits.sourceId := hintQueue.io.deq.bits
-
   // =========== XSPerf ===========
   if (cacheParams.enablePerf) {
     val timers = RegInit(VecInit(Seq.fill(grantBufInflightSize){0.U(64.W)}))
@@ -301,7 +288,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
       case (e, t) =>
         when(e.valid) { t := t + 1.U }
         when(RegNext(e.valid) && !e.valid) { t := 0.U }
-        assert(t < 10000.U, "Inflight Grant Leak")
+        if(cacheParams.enableAssert) assert(t < 10000.U, "Inflight Grant Leak")
 
         val enable = RegNext(e.valid) && !e.valid
         XSPerfHistogram("grant_grantack_period", t, enable, 0, 12, 1)

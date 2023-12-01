@@ -91,7 +91,7 @@ class SourceB(implicit p: Parameters) extends L2Module with HasPerfLogging{
     p.rdy   := !conflict
     p.waitG := OHToUInt(conflictMask)
     p.task  := io.task.bits
-    assert(PopCount(conflictMask) <= 1.U)
+    if(cacheParams.enableAssert) assert(PopCount(conflictMask) <= 1.U)
   }
 
   /* ======== Issue ======== */
@@ -119,8 +119,10 @@ class SourceB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   io.sourceB.bits  := toTLBundleB(issueArb.io.out.bits)
 
   /* ======== Perf ======== */
-  for(i <- 0 until entries){
-    val update = PopCount(probes.map(_.valid)) === i.U
-    XSPerfAccumulate(s"probe_buffer_util_$i", update)
+  if(cacheParams.enablePerf) {
+    for(i <- 0 until entries){
+      val update = PopCount(probes.map(_.valid)) === i.U
+      XSPerfAccumulate(s"probe_buffer_util_$i", update)
+    }
   }
 }

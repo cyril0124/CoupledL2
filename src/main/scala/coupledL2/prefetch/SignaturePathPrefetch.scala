@@ -110,7 +110,7 @@ class SignatureTable(parentName:String="Unkown")(implicit p: Parameters) extends
     val resp = DecoupledIO(new SignatureTableResp) //output old signature and delta to write PT
     val bp_update = Flipped(ValidIO(new BreakPointReq))
   })
-  assert(pageAddrBits>=(2 * log2Up(sTableEntries)),s"pageAddrBits as least 20 bits to use hash")
+  if(cacheParams.enableAssert) assert(pageAddrBits>=(2 * log2Up(sTableEntries)),s"pageAddrBits as least 20 bits to use hash")
   def hash1(addr:    UInt) = addr(log2Up(sTableEntries) - 1, 0)
   def hash2(addr:    UInt) = addr(2 * log2Up(sTableEntries) - 1, log2Up(sTableEntries))
   def idx(addr:      UInt) = hash1(addr) ^ hash2(addr)

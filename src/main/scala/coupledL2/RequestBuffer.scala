@@ -55,12 +55,20 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     val ATag        = Output(UInt(tagBits.W))
     val ASet        = Output(UInt(setBits.W))
 
+    /* send to sinkA and req_buffer to count stall */
+    val bufferInfo = Vec(entries, ValidIO(new MainPipeInfo))
+
     // when Probe/Release/MSHR enters MainPipe, we need also to block A req
     val s1Entrance = Flipped(ValidIO(new L2Bundle {
       val set = UInt(setBits.W)
     }))
 
     val hasLatePF = Output(Bool())
+
+    val hintDup = ValidIO(new Bundle() {
+      val tag = Input(UInt(tagBits.W))
+      val set = Input(UInt(setBits.W))
+    })
   })
 
   /* ======== Data Structure ======== */
@@ -121,7 +129,13 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
       e.valid && sameAddr(in, e.task)
     )
   ).asUInt
-  val dup        = io.in.valid && isPrefetch && dupMask.orR
+
+  val dup        = io.in.valid && isPrefetch && dupMask.orR // open latePf dup
+//  val dup        = false.B // close latePf dup
+
+  io.hintDup.valid := dup
+  io.hintDup.bits.tag := io.in.bits.tag
+  io.hintDup.bits.set := io.in.bits.set
 
   //!! TODO: we can also remove those that duplicate with mainPipe
 
@@ -149,7 +163,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     entry.waitMS  := conflictMask(in)
 
 //    entry.depMask := depMask
-    assert(PopCount(conflictMask(in)) <= 2.U)
+    if(cacheParams.enableAssert) assert(PopCount(conflictMask(in)) <= 2.U)
   }
 
   /* ======== Issue ======== */
@@ -245,6 +259,21 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   // for Dir to choose a free way
   io.out.bits.wayMask := Fill(cacheParams.ways, 1.U(1.W))
 
+
+  def TaskBundletoMainPipeInfo(task: TaskBundle): MainPipeInfo = {
+    val info = Wire(new MainPipeInfo)
+    info.reqTag := task.tag
+    info.set := task.set
+    info.isPrefetch := task.opcode === Hint
+    info.channel := task.channel
+    info
+  }
+  io.bufferInfo.zip(buffer).foreach {
+    case (out, in) =>
+      out.valid := in.valid
+      out.bits := TaskBundletoMainPipeInfo(in.task)
+  }
+
   // add XSPerf to see how many cycles the req is held in Buffer
   if(cacheParams.enablePerf) {
     XSPerfAccumulate("drop_prefetch", dup) // this also serves as late prefetch
@@ -266,7 +295,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
       case (e, t) =>
         when(e.valid) { t := t + 1.U }
         when(RegNext(RegNext(e.valid) && !e.valid)) { t := 0.U }
-        assert(t < 20000.U, "ReqBuf Leak")
+        if(cacheParams.enableAssert) assert(t < 20000.U, "ReqBuf Leak")
 
         val enable = RegNext(e.valid) && !e.valid
         XSPerfHistogram("reqBuf_timer", t, enable, 0, 20, 1, right_strict = true)

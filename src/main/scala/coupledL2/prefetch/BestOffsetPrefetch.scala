@@ -166,7 +166,7 @@ class RecentRequestTable(implicit p: Parameters) extends BOPModule {
   rrTable.io.r.req.bits.setIdx := idx(rAddr)
   rData := rrTable.io.r.resp.data(0)
 
-  assert(!RegNext(io.w.fire && io.r.req.fire), "single port SRAM should not read and write at the same time")
+  if(cacheParams.enableAssert) assert(!RegNext(io.w.fire && io.r.req.fire), "single port SRAM should not read and write at the same time")
 
   io.w.ready := rrTable.io.w.req.ready && !io.r.req.valid
   io.r.req.ready := true.B

@@ -70,11 +70,11 @@ class Monitor(implicit p: Parameters) extends L2Module {
 
   val c_should_has_client_hit = s3_valid && !mshr_req_s3 && dirResult_s3.hit && meta_s3.state === TRUNK && !meta_s3.clients.orR
   dontTouch(c_should_has_client_hit)
-  assert(RegNext(!(c_should_has_client_hit)), "Trunk should have some client hit addr: %x", debug_addr_s3)
+  if(cacheParams.enableAssert) assert(RegNext(!(c_should_has_client_hit)), "Trunk should have some client hit addr: %x", debug_addr_s3)
 
   val inv_should_not_send_c = s3_valid && req_s3.fromC && dirResult_s3.hit && !meta_s3.clients.orR
   dontTouch(inv_should_not_send_c)
-  assert(RegNext(!(inv_should_not_send_c)), "Invalid Client should not send Release addr: %x", debug_addr_s3)
+  if(cacheParams.enableAssert) assert(RegNext(!(inv_should_not_send_c)), "Invalid Client should not send Release addr: %x", debug_addr_s3)
 
   // assertion for set blocking
   // A channel task @s1 never have same-set task @s2/s3

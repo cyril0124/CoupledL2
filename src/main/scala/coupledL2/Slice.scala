@@ -35,21 +35,22 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
     val in = Flipped(TLBundle(edgeIn.bundle))
     val out = TLBundle(edgeOut.bundle)
     val sliceId = Input(UInt(bankBits.W))
-    val l1Hint = Decoupled(new L2ToL1Hint())
     val prefetch = prefetchOpt.map(_ => Flipped(new PrefetchIO))
     val msStatus = topDownOpt.map(_ => Vec(mshrsAll, ValidIO(new MSHRStatus)))
     val dirResult = topDownOpt.map(_ => ValidIO(new DirResult))
     val latePF = topDownOpt.map(_ => Output(Bool()))
   })
 
+  val reqBuf_entries = 4
+
   val reqArb = Module(new RequestArb())
-  val a_reqBuf = Module(new RequestBuffer)
+  val a_reqBuf = Module(new RequestBuffer(entries = reqBuf_entries))
   val mainPipe = Module(new MainPipe())
   val mshrCtl = Module(new MSHRCtl())
   val directory = Module(new Directory(parentName + "dir_"))
   val dataStorage = Module(new DataStorage(parentName + "data_"))
   val refillUnit = Module(new RefillUnit())
-  val sinkA = Module(new SinkA)
+  val sinkA = Module(new SinkA(entries = reqBuf_entries))
   val sinkB = Module(new SinkB)
   val sinkC = Module(new SinkC)
   val sourceC = Module(new SourceC)
@@ -69,6 +70,8 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   a_reqBuf.io.mshrInfo := mshrCtl.io.msInfo
   a_reqBuf.io.mainPipeBlock := mainPipe.io.toReqBuf
   a_reqBuf.io.s1Entrance := reqArb.io.s1Entrance
+  sinkA.io.mshrInfo := mshrCtl.io.msInfo
+  sinkA.io.mpInfo := a_reqBuf.io.bufferInfo ++ reqArb.io.mpInfo ++ mainPipe.io.mpInfo
   sinkB.io.s3Info := mainPipe.io.toSinkB
   sinkB.io.msInfo := mshrCtl.io.msInfo
   sinkC.io.msInfo := mshrCtl.io.msInfo
@@ -111,13 +114,14 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   mainPipe.io.bufRead <> sinkC.io.bufRead
   mainPipe.io.bufResp <> sinkC.io.bufResp
   mainPipe.io.toDS.rdata_s5 := dataStorage.io.rdata
+  mainPipe.io.toDS.error_s5 := dataStorage.io.error
   mainPipe.io.refillBufResp_s3.valid := RegNext(refillBuf.io.r.valid && refillBuf.io.r.ready, false.B)
-  mainPipe.io.refillBufResp_s3.bits := refillBuf.io.r.data
+  mainPipe.io.refillBufResp_s3.bits.data := refillBuf.io.r.data.data
+  mainPipe.io.refillBufResp_s3.bits.corrupt := refillBuf.io.r.corrupt
   mainPipe.io.releaseBufResp_s3.valid := RegNext(releaseBuf.io.r.valid && releaseBuf.io.r.ready, false.B)
-  mainPipe.io.releaseBufResp_s3.bits := releaseBuf.io.r.data
+  mainPipe.io.releaseBufResp_s3.bits.data := releaseBuf.io.r.data.data
+  mainPipe.io.releaseBufResp_s3.bits.corrupt := releaseBuf.io.r.corrupt
   mainPipe.io.fromReqArb.status_s1 := reqArb.io.status_s1
-  mainPipe.io.grantBufferHint := grantBuf.io.l1Hint
-  mainPipe.io.globalCounter := grantBuf.io.globalCounter
   mainPipe.io.taskInfo_s1 <> reqArb.io.taskInfo_s1
 
   // priority: nested-ReleaseData / probeAckData [NEW] > mainPipe DS rdata [OLD]
@@ -126,6 +130,7 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   releaseBuf.io.w(0).beat_sel := Fill(beatSize, 1.U(1.W))
   releaseBuf.io.w(0).data := mainPipe.io.nestedwbData
   releaseBuf.io.w(0).id := mshrCtl.io.nestedwbDataId.bits
+  releaseBuf.io.w(0).corrupt := mainPipe.io.nestedwbDataHasCorrupt
   releaseBuf.io.w(1) <> sinkC.io.releaseBufWrite
   releaseBuf.io.w(1).id := mshrCtl.io.releaseBufWriteId
   releaseBuf.io.w(2) <> mainPipe.io.releaseBufWrite
@@ -135,14 +140,13 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   refillBuf.io.w(2) <> mainPipe.io.refillBufWrite
 
   sourceC.io.in <> mainPipe.io.toSourceC
-  
-  io.l1Hint.valid := mainPipe.io.l1Hint.valid
-  io.l1Hint.bits := mainPipe.io.l1Hint.bits
+
   mshrCtl.io.grantStatus := grantBuf.io.grantStatus
 
   grantBuf.io.d_task <> mainPipe.io.toSourceD
   grantBuf.io.fromReqArb.status_s1 := reqArb.io.status_s1
   grantBuf.io.pipeStatusVec := reqArb.io.status_vec ++ mainPipe.io.status_vec
+  grantBuf.io.hintDup := a_reqBuf.io.hintDup
   mshrCtl.io.pipeStatusVec(0) := reqArb.io.status_vec(1) // s2 status
   mshrCtl.io.pipeStatusVec(1) := mainPipe.io.status_vec(0) // s3 status
 

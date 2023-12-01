@@ -6,7 +6,7 @@ import org.chipsalliance.cde.config._
 import chisel3.stage.ChiselGeneratorAnnotation
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
-import coupledL2._
+import coupledL2.{CoupledL2, L2ParamKey}
 import coupledL2.prefetch._
 import huancun.{HuanCun, HCCacheParameters, HCCacheParamsKey, CacheParameters}
 import scala.collection.mutable.ArrayBuffer

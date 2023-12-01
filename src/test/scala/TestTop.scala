@@ -493,8 +493,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   }
 
   val l2xbar = TLXbar()
-  val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffL), beatBytes = 32))
-  // val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffffL), beatBytes = 32))
+  // val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffffL), beatBytes = 32)) // Normal rtl-based memory
+  val ram = LazyModule(new coupledL2.TLRAM(AddressSet(0, 0xffffffffffffL), beatBytes = 32)) // DPI-C memory
   var master_nodes: Seq[TLClientNode] = Seq() // TODO
   val NumCores=2
   // val nullNode = LazyModule(new SppSenderNull)
@@ -515,8 +515,9 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       case L2ParamKey => L2Param(
         name = s"l2$i",
         ways = 4,
-        // sets = 128,
         sets = 32,
+        // ways = 8,
+        // sets = 256,
         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
         echoField = Seq(huancun.DirtyField()),
         // prefetch = Some(BOPParameters(rrTableEntries = 16,rrTagBits = 6))
@@ -555,6 +556,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       level = 3,
       ways = 4,
       sets = 64,
+      // sets = 2048,
       inclusive = false,
       clientCaches = Seq(CacheParameters(sets = 32, ways = 4, blockGranularity = log2Ceil(32), name = "L2")),
       sramClkDivBy2 = true,
@@ -563,7 +565,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       simulation = true,
       hasMbist = false,
       prefetch = None,
-      prefetchRecv =  Some(huancun.prefetch.PrefetchReceiverParams()),
+      prefetchRecv = Some(huancun.prefetch.PrefetchReceiverParams()), // None, //Some(huancun.prefetch.PrefetchReceiverParams()),
       tagECC = Some("secded"),
       dataECC = Some("secded"),
       ctrl = Some(huancun.CacheCtrl(
@@ -617,19 +619,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       maxFlight = Some(16)
     ))
   )))
- l2xbar := TLBuffer() := AXI2TL(16, 16) := l3FrontendAXI4Node
-  // l2xbar :=
-  // TLFIFOFixer() :=
-  // TLWidthWidget(32) :=
-  // TLBuffer() :=
-  // AXI4ToTL() :=
-  // AXI4Buffer() :=
-  // AXI4UserYanker(Some(16)) :=
-  // AXI4Fragmenter() :=
-  // AXI4Buffer() :=
-  // AXI4Buffer() :=
-  // AXI4IdIndexer(4) :=
-  // l3FrontendAXI4Node
+ l2xbar := TLBuffer() := AXI2TL(16, 16) := AXI4Fragmenter() := l3FrontendAXI4Node
 
   ram.node :=
     TLXbar() :=*

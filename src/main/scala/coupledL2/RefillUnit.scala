@@ -52,6 +52,8 @@ class RefillUnit(implicit p: Parameters) extends L2Module {
   io.refillBufWrite.beat_sel := UIntToOH(beat)
   io.refillBufWrite.data.data := Fill(beatSize, io.sinkD.bits.data)
   io.refillBufWrite.id := io.sinkD.bits.source
+  io.refillBufWrite.corrupt := io.sinkD.bits.corrupt
+  dontTouch(io.sinkD.bits.corrupt)
 
   io.resp.valid := (first || last) && io.sinkD.valid
   io.resp.mshrId := io.sinkD.bits.source
@@ -65,17 +67,4 @@ class RefillUnit(implicit p: Parameters) extends L2Module {
   dontTouch(io.resp.respInfo.isHit)
 
   io.sinkD.ready := true.B
-
-  // // count refillData all zero
-  // // (assume beat0 and beat1 of the same block always come continuously, no intersection)
-  // val zero = RegInit(true.B)
-  // when (io.refillBufWrite.valid) {
-  //   when (beat === beatSize.U) {
-  //     zero := true.B // init as true
-  //   } .otherwise {
-  //     zero := zero & io.sinkD.bits.data === 0.U // if beat not 0.U, clear 'zero'
-  //   }
-  // }
-  // XSPerfAccumulate(cacheParams, "sinkD_from_L3_zero", io.refillBufWrite.valid && beat === beatSize.U && zero && io.sinkD.bits.data === 0.U)
-  // XSPerfAccumulate(cacheParams, "sinkD_from_L3_all",  io.refillBufWrite.valid && beat === beatSize.U)
 }

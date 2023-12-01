@@ -81,6 +81,7 @@ class DataStorage(parentName:String = "Unknown")(implicit p: Parameters) extends
     )
   } else None
   if (dataEccBits > 0) {
+    println("Data ECC is enable!")
     val bankWrDataVec = io.wdata.asTypeOf(Vec(banksECC, UInt((bankBytes*8).W)))
     
     val dataEccRdData = Wire(Vec(banksECC, UInt((dataEccBits).W)))
@@ -115,16 +116,13 @@ class DataStorage(parentName:String = "Unknown")(implicit p: Parameters) extends
       dsBlock
     }
 
-    io.error := false.B // TODO: ECC: Cat(Cat(dataEccErrVec) & ~Cat(dataEccCorrVec)).orR
-//    io.rdata := RegNextN(array.io.r.resp.data(0), sramLatency - 1) // TODO: ECC: toDSBlock(corrDataVec)
-    io.rdata := RegEnable(array.io.r.resp.data(0), RegNext(ren))
-    // TODO: ECC
-    // when(~reset.asBool) {
-    //   assert(RegNext(!io.error), "For now, we won't ECC error happen in DataStorage...")
-    // }
+    io.error := Cat(Cat(dataEccErrVec) & ~Cat(dataEccCorrVec)).orR
+    io.rdata := toDSBlock(corrDataVec)
+    when(~reset.asBool) {
+      assert(RegNext(!io.error), "For now, we won't ECC error happen in DataStorage...")
+    }
   } else {
     io.error := false.B
-//    io.rdata := RegNextN(array.io.r.resp.data(0), sramLatency - 1)
     io.rdata := RegEnable(array.io.r.resp.data(0), RegNext(ren))
   }
 

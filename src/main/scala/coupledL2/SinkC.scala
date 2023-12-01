@@ -30,7 +30,7 @@ class PipeBufferRead(implicit p: Parameters) extends L2Bundle {
   val bufIdx = UInt(bufIdxBits.W)
 }
 
-class PipeBufferResp(implicit p: Parameters) extends L2Bundle {
+class PipeBufferResp(implicit p: Parameters) extends L2Bundle with HasCorruptBit {
   val data = Vec(beatSize, UInt((beatBytes * 8).W))
 }
 
@@ -56,10 +56,10 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
 
   // dataBuf entry is valid when Release has data
   // taskBuf entry is valid when ReqArb is not ready to receive C tasks
-  val dataBuf = Reg(Vec(bufBlocks, Vec(beatSize, UInt((beatBytes * 8).W))))
+  val dataBuf = RegInit(VecInit(Seq.fill(bufBlocks)(VecInit(Seq.fill(beatSize)(0.U.asTypeOf(UInt((beatBytes * 8).W)))))))
   val beatValids = RegInit(VecInit(Seq.fill(bufBlocks)(VecInit(Seq.fill(beatSize)(false.B)))))
   val dataValids = VecInit(beatValids.map(_.asUInt.orR)).asUInt
-  val taskBuf = Reg(Vec(bufBlocks, new TaskBundle))
+  val taskBuf = RegInit(VecInit(Seq.fill(bufBlocks)(0.U.asTypeOf(new TaskBundle))))
   val taskValids = RegInit(VecInit(Seq.fill(bufBlocks)(false.B)))
   val taskArb = Module(new RRArbiterInit(new TaskBundle, bufBlocks))
   val outPipe = Queue(taskArb.io.out, entries = 1, pipe = true, flow = false) // for timing: taskArb <> outPipe
@@ -102,6 +102,7 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
     task.reqSource := MemReqSource.NoWhere.id.U // Ignore
     task.replTask := false.B
     task.mergeTask := false.B
+    task.corrupt := c.corrupt
     task
   }
 
@@ -111,7 +112,7 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
         dataBuf(nextPtr)(beat) := io.c.bits.data
         beatValids(nextPtr)(beat) := true.B
       }.otherwise {
-        assert(last)
+        if(cacheParams.enableAssert) assert(last)
         dataBuf(nextPtrReg)(beat) := io.c.bits.data
         beatValids(nextPtrReg)(beat) := true.B
       }
@@ -167,6 +168,7 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
   io.releaseBufWrite.beat_sel := UIntToOH(beat)
   io.releaseBufWrite.data.data := Fill(beatSize, io.c.bits.data)
   io.releaseBufWrite.id := 0.U(mshrBits.W) // id is given by MSHRCtl by comparing address to the MSHRs
+  io.releaseBufWrite.corrupt := io.c.bits.corrupt
 
   // C-Release writing new data to refillBuffer, for repl-Release to write to DS
   val newdataMask = VecInit(io.msInfo.map(s =>
@@ -184,15 +186,19 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
   io.refillBufWrite.beat_sel := Fill(beatSize, 1.U(1.W))
   io.refillBufWrite.id := RegNext(OHToUInt(newdataMask))
   io.refillBufWrite.data.data := dataBuf(RegNext(io.task.bits.bufIdx)).asUInt
+  io.refillBufWrite.corrupt := taskBuf(RegNext(io.task.bits.bufIdx)).corrupt
 
   io.c.ready := !isRelease || !first || !full || !hasData && io.task.ready && !outPipe.valid
 
   io.bufResp.data := dataBuf(io.bufRead.bits.bufIdx)
+  io.bufResp.corrupt := taskBuf(io.bufRead.bits.bufIdx).corrupt
 
   // Performance counters
-  val stall = io.c.valid && isRelease && !io.c.ready
-  XSPerfAccumulate("sinkC_c_stall", stall)
-  XSPerfAccumulate("sinkC_c_stall_for_noSpace", stall && hasData && first && full)
-  XSPerfAccumulate("sinkC_toReqArb_stall", io.task.valid && !io.task.ready)
-  XSPerfAccumulate("sinkC_buf_full", full)
+  if(cacheParams.enablePerf) {
+    val stall = io.c.valid && isRelease && !io.c.ready
+    XSPerfAccumulate("sinkC_c_stall", stall)
+    XSPerfAccumulate("sinkC_c_stall_for_noSpace", stall && hasData && first && full)
+    XSPerfAccumulate("sinkC_toReqArb_stall", io.task.valid && !io.task.ready)
+    XSPerfAccumulate("sinkC_buf_full", full)
+  }
 }
