@@ -297,7 +297,11 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   //read pTable
   pTable.io.r.req.valid := enread
   pTable.io.r.req.bits.setIdx := idx(readSignature)
-  readResult := pTable.io.r.resp.data(0)
+
+  val pTable_r_resp = Mux(reset.asBool, pTable.io.r.resp.data(0), 0.U.asTypeOf(pTable.io.r.resp.data(0)))
+  readResult := pTable_r_resp
+  dontTouch(readResult)
+
   hit := readResult.valid && tag(lastSignature) === readResult.tag
   //set output
   val maxEntry = readResult_reg.deltaEntries.reduce((a, b) => Mux(a.cDelta >= b.cDelta, a, b))
@@ -498,7 +502,9 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
 
   pTable.io.r.req.valid := q.io.deq.fire || state === s_updateTable || s1_continue
   pTable.io.r.req.bits.setIdx := idx(s0_current.signature)
-  s0_readResult := pTable.io.r.resp.data(0)
+  val pTable_r_resp = Mux(reset.asBool, pTable.io.r.resp.data(0), 0.U.asTypeOf(pTable.io.r.resp.data(0)))
+  s0_readResult := pTable_r_resp
+  dontTouch(s0_readResult)
 
   val enbp = WireInit(true.B)
   val bp_update = WireInit(false.B)
@@ -778,7 +784,11 @@ class SignaturePathPrefetch(parentName:String="Unkown")(implicit p: Parameters) 
 
   pTable.io.req <> sTable.io.resp //to detail
   pTable.io.pt2st_bp <> sTable.io.bp_update
-  pTable.io.resp <> unpack.io.req
+
+  val pTable_resp = Mux(reset.asBool, pTable.io.resp.bits, 0.U.asTypeOf(pTable.io.resp.bits))
+  pTable.io.resp.ready := false.B
+  unpack.io.req.valid := false.B
+  unpack.io.req.bits := pTable_resp
 
   val newAddr = Cat(unpack.io.resp.bits.prefetchBlock, 0.U(offsetBits.W))
   val db_degree = RegEnable(io.db_degree.bits, 1.U, io.db_degree.valid)
