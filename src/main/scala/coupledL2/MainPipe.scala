@@ -75,14 +75,13 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     val bufResp = Input(new PipeBufferResp)
 
     /* get ReleaseBuffer and RefillBuffer read result */
-    val refillBufResp_s3 = Flipped(ValidIO(new DSBlock with HasCorruptBit))
-    val releaseBufResp_s3 = Flipped(ValidIO(new DSBlock with HasCorruptBit))
+    val refillBufResp_s3 = Flipped(ValidIO(new DSBlock))
+    val releaseBufResp_s3 = Flipped(ValidIO(new DSBlock))
 
     /* read or write data storage */
     val toDS = new Bundle() {
       val req_s3 = ValidIO(new DSRequest)
       val rdata_s5 = Input(new DSBlock)
-      val error_s5 = Input(Bool())
       val wdata_s3 = Output(new DSBlock)
     }
 
@@ -107,7 +106,6 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
 
     val nestedwb = Output(new NestedWriteback)
     val nestedwbData = Output(new DSBlock)
-    val nestedwbDataHasCorrupt = Output(Bool())
 
     /* send prefetchTrain to Prefetch to trigger a prefetch req */
     val prefetchTrain = prefetchOpt.map(_ => DecoupledIO(new PrefetchTrain))
@@ -247,7 +245,6 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   ms_task.replTask         := false.B
   ms_task.mergeTask        := false.B
   ms_task.reqSource        := req_s3.reqSource
-  ms_task.corrupt          := false.B
 
   /* ======== Resps to SinkA/B/C Reqs ======== */
   val sink_resp_s3 = WireInit(0.U.asTypeOf(Valid(new TaskBundle))) // resp for sinkA/B/C request that does not need to alloc mshr
@@ -295,9 +292,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
 
   /* ======== Interact with DS ======== */
   val data_s3 = Mux(io.releaseBufResp_s3.valid, io.releaseBufResp_s3.bits.data, io.refillBufResp_s3.bits.data) // releaseBuf prior
-  val error_s3 = Mux(io.releaseBufResp_s3.valid, io.releaseBufResp_s3.bits.corrupt, io.refillBufResp_s3.bits.corrupt)
   val c_releaseData_s3 = RegNext(io.bufResp.data.asUInt)
-  val c_releaseHasCorrupt_s3 = RegNext(io.bufResp.corrupt.asUInt)
   val hasData_s3 = source_req_s3.opcode(0)
 
   val need_data_a  = dirResult_s3.hit && (req_get_s3 || req_acquireBlock_s3)
@@ -400,6 +395,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     ),
     MetaEntry()
   )
+  io.metaWReq.bits.channel := task_s3.bits.channel
 
   io.tagWReq.valid     := task_s3.valid && req_s3.tagWen && mshr_refill_s3 && !retry
   io.tagWReq.bits.set  := req_s3.set
@@ -427,10 +423,8 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   c_s3.valid := task_s3.valid && isC_s3
   d_s3.valid := task_s3.valid && isD_s3
   c_s3.bits.task      := source_req_s3
-  c_s3.bits.task.corrupt := error_s3
   c_s3.bits.data.data := data_s3
   d_s3.bits.task      := source_req_s3
-  d_s3.bits.task.corrupt := error_s3
   d_s3.bits.data.data := data_s3
 
   /* ======== nested & prefetch ======== */
@@ -443,7 +437,6 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   io.nestedwb.c_set_dirty := task_s3.valid && task_s3.bits.fromC && task_s3.bits.opcode === ReleaseData
 
   io.nestedwbData := c_releaseData_s3.asTypeOf(new DSBlock)
-  io.nestedwbDataHasCorrupt := c_releaseHasCorrupt_s3
 
   if(io.prefetchTrain.isDefined){
     val train = io.prefetchTrain.get
@@ -468,7 +461,6 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   val task_s4 = RegInit(0.U.asTypeOf(Valid(new TaskBundle())))
   val data_unready_s4 = RegInit(false.B)
   val data_s4 = Reg(UInt((blockBytes * 8).W))
-  val error_s4 = RegInit(false.B)
   val ren_s4 = RegInit(false.B)
   val need_write_releaseBuf_s4 = RegInit(false.B)
   val need_write_refillBuf_s4 = RegInit(false.B)
@@ -479,7 +471,6 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     task_s4.bits.mshrId := Mux(!task_s3.bits.mshrTask && need_mshr_s3, io.fromMSHRCtl.mshr_alloc_ptr, source_req_s3.mshrId)
     data_unready_s4 := data_unready_s3
     data_s4 := data_s3
-    error_s4 := error_s3
     ren_s4 := ren
     need_write_releaseBuf_s4 := need_write_releaseBuf
     need_write_refillBuf_s4 := need_write_refillBuf
@@ -504,10 +495,8 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   c_s4.valid := c_d_valid_s4 && isC_s4
   d_s4.valid := c_d_valid_s4 && isD_s4
   c_s4.bits.task := task_s4.bits
-  c_s4.bits.task.corrupt := error_s4
   c_s4.bits.data.data := data_s4
   d_s4.bits.task := task_s4.bits
-  d_s4.bits.task.corrupt := error_s4
   d_s4.bits.data.data := data_s4
 
   /* ======== Stage 5 ======== */
@@ -515,7 +504,6 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   val task_s5_dups_valid = RegInit(VecInit(Seq.fill(4)(false.B)))
   val ren_s5 = RegInit(false.B)
   val data_s5 = Reg(UInt((blockBytes * 8).W))
-  val error_s5 = RegInit(false.B)
   val need_write_releaseBuf_s5_dups = RegInit(VecInit(Seq.fill(mshrsAll)(false.B)))
   val need_write_refillBuf_s5_dups = RegInit(VecInit(Seq.fill(mshrsAll)(false.B)))
   val isC_s5, isD_s5 = RegInit(false.B)
@@ -525,7 +513,6 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     task_s5.bits := task_s4.bits
     ren_s5 := ren_s4
     data_s5 := data_s4
-    error_s5 := error_s4
     need_write_releaseBuf_s5_dups.foreach(_ := need_write_releaseBuf_s4)
     need_write_refillBuf_s5_dups.foreach(_ := need_write_refillBuf_s4)
     isC_s5 := isC_s4 || task_s4.bits.fromB && !task_s4.bits.mshrTask && task_s4.bits.opcode === ProbeAckData
@@ -533,9 +520,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
       (task_s4.bits.opcode === GrantData || task_s4.bits.opcode === AccessAckData)
   }
   val rdata_s5 = io.toDS.rdata_s5.data
-  val rerror_s5 = io.toDS.error_s5
   val out_data_s5 = Mux(!task_s5.bits.mshrTask, rdata_s5, data_s5)
-  val out_error_s5 = Mux(!task_s5.bits.mshrTask, rerror_s5, error_s5)
   val chnl_fire_s5 = c_s5.fire || d_s5.fire
 
   io.releaseBufWrite.valid_dups.zipWithIndex.foreach{
@@ -544,8 +529,6 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   }
   io.releaseBufWrite.beat_sel   := Fill(beatSize, 1.U(1.W))
   io.releaseBufWrite.data.data  := rdata_s5
-  io.releaseBufWrite.corrupt    := rerror_s5
-  // dontTouch(io.releaseBufWrite.corrupt)
   io.releaseBufWrite.id         := task_s5.bits.mshrId
   if(cacheParams.enableAssert)
     assert(!(io.releaseBufWrite.valid_dups.reduce(_||_) && !io.releaseBufWrite.ready), "releaseBuf should be ready when given valid")
@@ -556,8 +539,6 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   }
   io.refillBufWrite.beat_sel  := Fill(beatSize, 1.U(1.W))
   io.refillBufWrite.data.data := rdata_s5
-  io.refillBufWrite.corrupt   := rerror_s5
-  // dontTouch(io.refillBufWrite.corrupt)
   io.refillBufWrite.id        := task_s5.bits.mshrId
   if(cacheParams.enableAssert)
     assert(!(io.refillBufWrite.valid_dups.reduce(_||_) && !io.refillBufWrite.ready), "refillBuf should be ready when given valid")
@@ -566,10 +547,8 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   c_s5.valid := c_d_valid_s5 && isC_s5
   d_s5.valid := c_d_valid_s5 && isD_s5
   c_s5.bits.task := task_s5.bits
-  c_s5.bits.task.corrupt := out_error_s5
   c_s5.bits.data.data := out_data_s5
   d_s5.bits.task := task_s5.bits
-  d_s5.bits.task.corrupt := out_error_s5
   d_s5.bits.data.data := out_data_s5
 
   /* ======== BlockInfo ======== */

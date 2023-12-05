@@ -179,10 +179,6 @@ class MSHR(implicit p: Parameters) extends L2Module {
     ob
   }
   val mp_release, mp_probeack, mp_merge_probeack, mp_grant = Wire(new TaskBundle)
-  mp_release.corrupt := false.B
-  mp_probeack.corrupt := false.B
-  mp_merge_probeack.corrupt := false.B
-  mp_grant.corrupt := false.B
   val mp_release_task = {
     mp_release.channel := req.channel
     mp_release.tag := dirResult_tag_dups(1)

@@ -74,7 +74,6 @@ class SinkA(entries: Int)(implicit p: Parameters) extends L2Module with HasPerfL
     task.vaddr.foreach(_ := a.user.lift(VaddrKey).getOrElse(0.U))
     task.mergeTask := false.B
     task.reqSource := DontCare
-    task.corrupt := a.corrupt
     task
   }
   def fromPrefetchReqtoTaskBundle(req: PrefetchReq): TaskBundle = {
@@ -109,7 +108,6 @@ class SinkA(entries: Int)(implicit p: Parameters) extends L2Module with HasPerfL
     task.replTask := false.B
     task.vaddr.foreach(_ := 0.U)
     task.mergeTask := false.B
-    task.corrupt := false.B
     task
   }
   commonReq.valid := io.a.valid
@@ -119,7 +117,8 @@ class SinkA(entries: Int)(implicit p: Parameters) extends L2Module with HasPerfL
     pipe.io.in <> io.prefetchReq.get
     prefetchReq.get.valid := pipe.io.out.valid
     prefetchReq.get.bits := fromPrefetchReqtoTaskBundle(pipe.io.out.bits)
-    pipe.io.out.ready := prefetchReq.get.ready
+    io.prefetchReq.get.ready := true.B
+    pipe.io.out.ready := true.B
     fastArb(Seq(commonReq, prefetchReq.get), io.task)
   } else {
     io.task <> commonReq
@@ -183,4 +182,14 @@ class SinkA(entries: Int)(implicit p: Parameters) extends L2Module with HasPerfL
       (io.task.bits.opcode === PutFullData || io.task.bits.opcode === PutPartialData))
     prefetchOpt.foreach { _ => XSPerfAccumulate("sinkA_prefetch_stall_by_mainpipe", stall && io.task.bits.opcode === Hint) }
   }
+
+  // cycels stalled by mainpipe
+  val stall = io.task.valid && !io.task.ready
+  XSPerfAccumulate("sinkA_stall_by_mainpipe", stall)
+  XSPerfAccumulate("sinkA_acquire_stall_by_mainpipe", stall &&
+    (io.task.bits.opcode === AcquireBlock || io.task.bits.opcode === AcquirePerm))
+  XSPerfAccumulate("sinkA_get_stall_by_mainpipe", stall && io.task.bits.opcode === Get)
+  XSPerfAccumulate("sinkA_put_stall_by_mainpipe", stall &&
+    (io.task.bits.opcode === PutFullData || io.task.bits.opcode === PutPartialData))
+  prefetchOpt.foreach { _ => XSPerfAccumulate("sinkA_prefetch_stall_by_mainpipe", stall && io.task.bits.opcode === Hint) }
 }

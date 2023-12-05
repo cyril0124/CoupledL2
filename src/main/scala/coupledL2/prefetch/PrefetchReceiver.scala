@@ -42,14 +42,13 @@ class PrefetchReceiver()(implicit p: Parameters) extends PrefetchModule {
     val req = DecoupledIO(new PrefetchReq)
     val recv_addr = Flipped(ValidIO(UInt(64.W)))
   })
-
-  io.req.bits.tag := parseFullAddress(io.recv_addr.bits)._1
-  io.req.bits.set := parseFullAddress(io.recv_addr.bits)._2
+  val recv_reg = RegEnable(io.recv_addr.bits,io.recv_addr.valid)
+  io.req.valid := RegNext(io.recv_addr.valid,false.B)
+  io.req.bits.tag := parseFullAddress(recv_reg)._1
+  io.req.bits.set := parseFullAddress(recv_reg)._2
   io.req.bits.needT := false.B
   io.req.bits.isBOP := false.B
   io.req.bits.source := 0.U // TODO: ensure source 0 is dcache
-  io.req.valid := io.recv_addr.valid
-
 }
 
 // fake sms send node fo TL_Test / Cocotb

@@ -130,7 +130,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     )
   ).asUInt
 
-  val dup        = io.in.valid && isPrefetch && dupMask.orR // open latePf dup
+  val dup        = io.in.fire && isPrefetch && dupMask.orR // open latePf dup
 //  val dup        = false.B // close latePf dup
 
   io.hintDup.valid := dup

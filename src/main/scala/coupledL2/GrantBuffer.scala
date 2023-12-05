@@ -96,7 +96,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
      d.sink := td.task.mshrId
      d.denied := false.B
      d.data := data(0).asUInt
-     d.corrupt := td.task.corrupt
+     d.corrupt := false.B
      d.echo.lift(DirtyKey).foreach(_ := td.task.dirty)
      beat1 := data(1)
 
@@ -171,38 +171,39 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
       entries = 32,
       flow = true))
 
-    val latePftRespQueue = Module(new Queue(new Bundle() {
-        val tag = UInt(tagBits.W)
-        val set = UInt(setBits.W)
-      },
-      entries = 32,
-      flow = true))
+    // val latePftRespQueue = Module(new Queue(new Bundle() {
+    //     val tag = UInt(tagBits.W)
+    //     val set = UInt(setBits.W)
+    //   },
+    //   entries = 32,
+    //   flow = true))
 
-    latePftRespQueue.io.enq.valid := io.hintDup.valid
-    latePftRespQueue.io.enq.bits.tag := io.hintDup.bits.tag
-    latePftRespQueue.io.enq.bits.set := io.hintDup.bits.set
+    // latePftRespQueue.io.enq.valid := io.hintDup.valid
+    // latePftRespQueue.io.enq.bits.tag := io.hintDup.bits.tag
+    // latePftRespQueue.io.enq.bits.set := io.hintDup.bits.set
 
     pftRespQueue.io.enq.valid := io.d_task.valid && dtaskOpcode === HintAck &&
       io.d_task.bits.task.fromL2pft.getOrElse(false.B)
     pftRespQueue.io.enq.bits.tag := io.d_task.bits.task.tag
     pftRespQueue.io.enq.bits.set := io.d_task.bits.task.set
 
-    val toPftArb = Module(new RRArbiterInit(new Bundle() {
-      val tag = UInt(tagBits.W)
-      val set = UInt(setBits.W)
-    }, 2))
-    toPftArb.io.in(0) <> pftRespQueue.io.deq
-    toPftArb.io.in(1) <> latePftRespQueue.io.deq
+    // val toPftArb = Module(new RRArbiterInit(new Bundle() {
+    //   val tag = UInt(tagBits.W)
+    //   val set = UInt(setBits.W)
+    // }, 2))
+    // toPftArb.io.in(0) <> pftRespQueue.io.deq
+    // toPftArb.io.in(1) <> latePftRespQueue.io.deq
 
     val resp = io.prefetchResp.get
-    resp <> toPftArb.io.out
+    // resp <> toPftArb.io.out
+    resp <> pftRespQueue.io.deq
 
 //    assert(latePftRespQueue.io.enq.ready, "latePftRespQueue should never be full, no back pressure logic") // TODO: has bug here
 //    assert(pftRespQueue.io.enq.ready, "pftRespQueue should never be full, no back pressure logic") // TODO: has bug here
-    if (cacheParams.enablePerf) {
-      XSPerfAccumulate("GrantBuf_late_prefetchResp_drop", latePftRespQueue.io.enq.valid && !latePftRespQueue.io.enq.ready)
-      XSPerfAccumulate("GrantBuf_prefetchResp_drop", pftRespQueue.io.enq.valid && !pftRespQueue.io.enq.ready)
-    }
+    // if (cacheParams.enablePerf) {
+    //   XSPerfAccumulate("GrantBuf_late_prefetchResp_drop", latePftRespQueue.io.enq.valid && !latePftRespQueue.io.enq.ready)
+    //   XSPerfAccumulate("GrantBuf_prefetchResp_drop", pftRespQueue.io.enq.valid && !pftRespQueue.io.enq.ready)
+    // }
   }
   // If no prefetch, there never should be HintAck
   if(cacheParams.enableAssert) assert(prefetchOpt.nonEmpty.B || !io.d_task.valid || dtaskOpcode =/= HintAck)

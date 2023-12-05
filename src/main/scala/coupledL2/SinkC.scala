@@ -30,7 +30,7 @@ class PipeBufferRead(implicit p: Parameters) extends L2Bundle {
   val bufIdx = UInt(bufIdxBits.W)
 }
 
-class PipeBufferResp(implicit p: Parameters) extends L2Bundle with HasCorruptBit {
+class PipeBufferResp(implicit p: Parameters) extends L2Bundle {
   val data = Vec(beatSize, UInt((beatBytes * 8).W))
 }
 
@@ -102,7 +102,6 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
     task.reqSource := MemReqSource.NoWhere.id.U // Ignore
     task.replTask := false.B
     task.mergeTask := false.B
-    task.corrupt := c.corrupt
     task
   }
 
@@ -168,7 +167,6 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
   io.releaseBufWrite.beat_sel := UIntToOH(beat)
   io.releaseBufWrite.data.data := Fill(beatSize, io.c.bits.data)
   io.releaseBufWrite.id := 0.U(mshrBits.W) // id is given by MSHRCtl by comparing address to the MSHRs
-  io.releaseBufWrite.corrupt := io.c.bits.corrupt
 
   // C-Release writing new data to refillBuffer, for repl-Release to write to DS
   val newdataMask = VecInit(io.msInfo.map(s =>
@@ -186,12 +184,10 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
   io.refillBufWrite.beat_sel := Fill(beatSize, 1.U(1.W))
   io.refillBufWrite.id := RegNext(OHToUInt(newdataMask))
   io.refillBufWrite.data.data := dataBuf(RegNext(io.task.bits.bufIdx)).asUInt
-  io.refillBufWrite.corrupt := taskBuf(RegNext(io.task.bits.bufIdx)).corrupt
 
   io.c.ready := !isRelease || !first || !full || !hasData && io.task.ready && !outPipe.valid
 
   io.bufResp.data := dataBuf(io.bufRead.bits.bufIdx)
-  io.bufResp.corrupt := taskBuf(io.bufRead.bits.bufIdx).corrupt
 
   // Performance counters
   if(cacheParams.enablePerf) {

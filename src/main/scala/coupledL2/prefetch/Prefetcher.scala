@@ -217,30 +217,6 @@ class Prefetcher(parentName:String="Unkown")(implicit p: Parameters) extends Pre
       XSPerfAccumulate( "prefetch_req_fromL1", l1_pf.io.req.valid)
       XSPerfAccumulate( "prefetch_req_fromL2", bop_en && bop.io.req.valid)
       XSPerfAccumulate( "prefetch_req_L1L2_overlapped", l1_pf.io.req.valid && bop_en && bop.io.req.valid)
-    
-    case hyperPf: HyperPrefetchParams => // case spp +  bop + smsReceiver
-      val hybrid_pfts = Module(new HyperPrefetcher())
-      val pftQueue = Module(new PrefetchQueue)
-      val pipe = Module(new Pipeline(io.req.bits.cloneType, 1))
-      hybrid_pfts.io.train <> io.train
-      hybrid_pfts.io.resp <> io.resp
-      hybrid_pfts.io.recv_addr := ValidIODelay(io.recv_addr, 2)
-
-      hybrid_pfts.io.evict <> io.evict
-      pftQueue.io.enq <> hybrid_pfts.io.req
-      pipe.io.in <> pftQueue.io.deq
-      io.req <> pipe.io.out
-
-      // has spp multi-level cache option
-      io.hint2llc match{
-        case Some(sender) =>
-          println(s"${cacheParams.name} Prefetch Config: BOP + SMS receiver + SPP + SPP cross-level refill")
-          sender <> hybrid_pfts.io.hint2llc
-        case _ => println(s"${cacheParams.name} Prefetch Config: BOP + SMS receiver + SPP")
-      }
-      hybrid_pfts.io.queue_used := pftQueue.io.used
-      hybrid_pfts.io.db_degree.valid := counterWrap
-      hybrid_pfts.io.db_degree.bits := pf_state
     case _ => assert(cond = false, "Unknown prefetcher")
   }
   XSPerfAccumulate( "prefetch_train", io.train.fire)
