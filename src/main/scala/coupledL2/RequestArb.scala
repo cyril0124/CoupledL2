@@ -31,7 +31,6 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
   val io = IO(new Bundle() {
     /* receive incoming tasks */
     val sinkA    = Flipped(DecoupledIO(new TaskBundle))
-    val ATag     = Input(UInt(tagBits.W)) // !TODO: very dirty, consider optimize structure
     val ASet     = Input(UInt(setBits.W)) // To pass A entrance status to MP for blockA-info of ReqBuf
     val mpInfo = Vec(2, Flipped(ValidIO(new Bundle() {
       val tag = UInt(tagBits.W)
@@ -209,7 +208,7 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
 
   /* status of each pipeline stage */
   io.status_s1.sets := VecInit(Seq(C_task.set, B_task.set, io.ASet, mshr_task_s1.bits.set))
-  io.status_s1.tags := VecInit(Seq(C_task.tag, B_task.tag, io.ATag, mshr_task_s1.bits.tag))
+  io.status_s1.tags := VecInit(Seq(C_task.tag, B_task.tag, 0.U, mshr_task_s1.bits.tag)) // DontCare ATag
   require(io.status_vec.size == 2)
   io.status_vec.zip(Seq(task_s1, task_s2)).foreach {
     case (status, task) =>

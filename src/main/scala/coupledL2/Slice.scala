@@ -67,7 +67,6 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
 
   a_reqBuf.io.in <> sinkA.io.task
   a_reqBuf.io.mshrInfo := mshrCtl.io.msInfo
-  a_reqBuf.io.mainPipeBlock := mainPipe.io.toReqBuf
   a_reqBuf.io.mpInfo := mainPipe.io.mpInfo
   a_reqBuf.io.s1Entrance := reqArb.io.s1Entrance
   sinkB.io.s3Info := mainPipe.io.toSinkB
@@ -75,7 +74,6 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   sinkC.io.msInfo := mshrCtl.io.msInfo
 
   reqArb.io.sinkA <> a_reqBuf.io.out
-  reqArb.io.ATag := a_reqBuf.io.ATag
   reqArb.io.ASet := a_reqBuf.io.ASet
   reqArb.io.mpInfo := mainPipe.io.mpInfo
 

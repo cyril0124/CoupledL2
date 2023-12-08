@@ -50,9 +50,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     val in          = Flipped(DecoupledIO(new TaskBundle))
     val out         = DecoupledIO(new TaskBundle)
     val mshrInfo  = Vec(mshrsAll, Flipped(ValidIO(new MSHRInfo)))
-    val mainPipeBlock = Input(Vec(2, Bool()))
 
-    val ATag        = Output(UInt(tagBits.W))
     val ASet        = Output(UInt(setBits.W))
 
     val mpInfo = Vec(2, Flipped(ValidIO(new Bundle() {
@@ -80,7 +78,6 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
 
   /* ======== Data Structure ======== */
 
-  io.ATag := io.in.bits.tag
   io.ASet := io.in.bits.set
 
   val buffer = RegInit(VecInit(Seq.fill(entries)(0.U.asTypeOf(new ReqEntry))))
