@@ -49,10 +49,8 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   val io = IO(new Bundle() {
     val in          = Flipped(DecoupledIO(new TaskBundle))
     val out         = DecoupledIO(new TaskBundle)
+
     val mshrInfo  = Vec(mshrsAll, Flipped(ValidIO(new MSHRInfo)))
-
-    val ASet        = Output(UInt(setBits.W))
-
     val mpInfo = Vec(2, Flipped(ValidIO(new Bundle() {
       val tag = UInt(tagBits.W)
       val set = UInt(setBits.W)
@@ -77,9 +75,6 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   val mp_blockA_s1 = mp_blockA(0) || mp_blockA(1)
 
   /* ======== Data Structure ======== */
-
-  io.ASet := io.in.bits.set
-
   val buffer = RegInit(VecInit(Seq.fill(entries)(0.U.asTypeOf(new ReqEntry))))
   val issueArb = Module(new FastArbiter(new ReqEntry, entries))
   val chosenQ = Module(new Queue(new ChosenQBundle(log2Ceil(entries)), entries = 1, pipe = true, flow = false))

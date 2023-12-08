@@ -581,7 +581,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     task_s4.valid && bBlock(task_s4.bits, tag = true) ||
     task_s5_dups_valid(3) && bBlock(task_s5.bits, tag = true)
 
-  io.toReqArb.blockA_s1 := true.B
+  io.toReqArb.blockA_s1 := false.B // mainpipe blockA logic in reqBuf
 
   io.mpInfo(0).valid := task_s2.valid
   io.mpInfo(0).bits.set := task_s2.bits.set

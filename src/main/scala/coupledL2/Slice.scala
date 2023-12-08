@@ -74,8 +74,6 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   sinkC.io.msInfo := mshrCtl.io.msInfo
 
   reqArb.io.sinkA <> a_reqBuf.io.out
-  reqArb.io.ASet := a_reqBuf.io.ASet
-  reqArb.io.mpInfo := mainPipe.io.mpInfo
 
   reqArb.io.sinkB <> sinkB.io.task
   reqArb.io.sinkC <> sinkC.io.task
