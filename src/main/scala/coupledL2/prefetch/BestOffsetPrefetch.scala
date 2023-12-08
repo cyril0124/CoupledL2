@@ -30,6 +30,8 @@ case class BOPParameters(
   scoreBits:      Int = 5,
   roundMax:       Int = 50,
   badScore:       Int = 1,
+  delayCycle:     Int = 200,
+  delayEntries:   Int = 64,
   offsetList: Seq[Int] = Seq(
     -32, -30, -27, -25, -24, -20, -18, -16, -15,
     -12, -10,  -9,  -8,  -6,  -5,  -4,  -3,  -2,  -1,
@@ -66,6 +68,9 @@ trait HasBOPParams extends HasCoupledL2Parameters {
   val roundBits = log2Up(roundMax)
   val scoreMax = (1 << scoreBits) - 1
   val scoreTableIdxBits = log2Up(scores)
+
+  val delayCycle = bopParams.delayCycle
+  val delayEntries = bopParams.delayEntries
   // val prefetchIdWidth = log2Up(inflightEntries)
 
   def signedExtend(x: UInt, width: Int): UInt = {
@@ -166,7 +171,7 @@ class RecentRequestTable(implicit p: Parameters) extends BOPModule {
   rrTable.io.r.req.bits.setIdx := idx(rAddr)
   rData := rrTable.io.r.resp.data(0)
 
-  if(cacheParams.enableAssert) assert(!RegNext(io.w.fire && io.r.req.fire), "single port SRAM should not read and write at the same time")
+  assert(!RegNext(io.w.fire && io.r.req.fire), "single port SRAM should not read and write at the same time")
 
   io.w.ready := rrTable.io.w.req.ready && !io.r.req.valid
   io.r.req.ready := true.B
@@ -176,11 +181,80 @@ class RecentRequestTable(implicit p: Parameters) extends BOPModule {
 
 }
 
+class DelayQueue(implicit p: Parameters) extends BOPModule {
+  val io = IO(new Bundle {
+    val enq = Flipped(DecoupledIO(UInt((fullAddressBits - offsetBits).W)))
+    val deq = DecoupledIO(UInt((fullAddressBits - offsetBits).W))
+  })
+
+  val validEntry = RegInit(VecInit(Seq.fill(delayEntries)(false.B)))
+  val addrQueue = RegInit(VecInit(Seq.fill(delayEntries)(0.U((fullAddressBits - offsetBits).W))))
+  val counters = RegInit(VecInit(Seq.fill(delayEntries)(0.U((log2Up(delayCycle) + 1).W))))
+
+  val head = RegInit(0.U((log2Up(delayEntries) + 1).W))
+  val tail = RegInit(0.U((log2Up(delayEntries) + 1).W))
+  val entryCount = RegInit(0.U((log2Up(delayEntries) + 1).W))
+
+  val s_idle :: s_push :: s_pop :: Nil = Enum(3)
+
+  val isFull = entryCount === delayEntries.U
+  val canPop = counters(head) >= delayCycle.U
+
+  val state = RegInit(s_idle)
+
+  val deqValid = RegInit(false.B)
+  val deqAddr = RegInit(0.U((fullAddressBits - offsetBits).W))
+
+  when(state === s_idle) {
+    deqValid := false.B
+    when(io.enq.fire && !isFull) {
+      state := s_push
+    }.elsewhen(canPop) {
+      state := s_pop
+    }
+  }
+
+  val s1_enqBits = RegNext(io.enq.bits)
+
+  when(state === s_push) {
+    deqValid := false.B
+    addrQueue(tail) := s1_enqBits
+    validEntry(tail) := true.B
+    counters(tail) := 1.U
+    tail := Mux(tail === (delayEntries - 1).U, 0.U, tail + 1.U)
+    state := s_idle
+    entryCount := entryCount + 1.U
+  }
+
+  when(state === s_pop) {
+    deqValid := true.B
+    deqAddr := addrQueue(head)
+
+    validEntry(head) := false.B
+    counters(head) := 0.U
+    head := Mux(head === (delayEntries - 1).U, 0.U, head + 1.U)
+    state := s_idle
+    entryCount := entryCount - 1.U
+  }
+
+  // Update counters for all entries except the one being popped
+  for (i <- 0 until delayEntries) {
+    when(validEntry(i) && (state =/= s_pop || (state === s_pop && i.U =/= head))) {
+      counters(i) := counters(i) + 1.U
+    }
+  }
+
+  io.deq.valid := deqValid
+  io.deq.bits := deqAddr
+  io.enq.ready := !isFull && (state === s_idle)
+}
+
 class OffsetScoreTable(implicit p: Parameters) extends BOPModule with HasPerfLogging{
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(UInt(fullAddressBits.W)))
     val prefetchOffset = Output(UInt(offsetWidth.W))
-    val test = new TestOffsetBundle
+    val testLeft = new TestOffsetBundle
+    val testRight = new TestOffsetBundle
   })
 
   val prefetchOffset = RegInit(2.U(offsetWidth.W))
@@ -224,7 +298,7 @@ class OffsetScoreTable(implicit p: Parameters) extends BOPModule with HasPerfLog
   // (1) one of the score equals SCOREMAX, or
   // (2) the number of rounds equals ROUNDMAX.
   when(state === s_learn) {
-    when(io.test.req.fire) {
+    when(io.testLeft.req.fire && io.testRight.req.fire ) {
       val roundFinish = ptr === (scores - 1).U
       ptr := Mux(roundFinish, 0.U, ptr + 1.U)
       round := Mux(roundFinish, round + 1.U, round)
@@ -235,11 +309,11 @@ class OffsetScoreTable(implicit p: Parameters) extends BOPModule with HasPerfLog
       state := s_idle
     }
 
-    when(io.test.resp.fire && io.test.resp.bits.hit) {
-      val oldScore = st(io.test.resp.bits.ptr).score
+    when(io.testRight.resp.fire && io.testRight.resp.bits.hit) {
+      val oldScore = st(io.testRight.resp.bits.ptr).score
       val newScore = oldScore + 1.U
-      val offset = offList(io.test.resp.bits.ptr)
-      st(io.test.resp.bits.ptr).score := newScore
+      val offset = offList(io.testRight.resp.bits.ptr)
+      st(io.testRight.resp.bits.ptr).score := newScore
       // bestOffset := winner((new ScoreTableEntry).apply(offset, newScore), bestOffset)
       val renewOffset = newScore > bestScore
       bestOffset := Mux(renewOffset, offset, bestOffset)
@@ -248,16 +322,35 @@ class OffsetScoreTable(implicit p: Parameters) extends BOPModule with HasPerfLog
       when(newScore >= scoreMax.U) {
         state := s_idle
       }
+    }.elsewhen(io.testLeft.resp.fire && io.testLeft.resp.bits.hit) {
+      val oldScore = st(io.testLeft.resp.bits.ptr).score
+      val newScore = oldScore + 1.U
+      val offset = offList(io.testLeft.resp.bits.ptr)
+      st(io.testLeft.resp.bits.ptr).score := newScore
+      // bestOffset := winner((new ScoreTableEntry2).apply(offset, newScore), bestOffset)
+      val renewOffset = newScore > bestScore
+      bestOffset := Mux(renewOffset, offset, bestOffset)
+      bestScore := Mux(renewOffset, newScore, bestScore)
+      when(newScore >= scoreMax.U) {
+        state := s_idle
+      }
     }
   }
 
   io.req.ready := state === s_learn
   io.prefetchOffset := prefetchOffset
-  io.test.req.valid := state === s_learn && io.req.valid
-  io.test.req.bits.addr := io.req.bits
-  io.test.req.bits.testOffset := testOffset
-  io.test.req.bits.ptr := ptr
-  io.test.resp.ready := true.B
+
+  io.testLeft.req.valid := state === s_learn && io.req.valid
+  io.testLeft.req.bits.addr := io.req.bits
+  io.testLeft.req.bits.testOffset := testOffset
+  io.testLeft.req.bits.ptr := ptr
+  io.testLeft.resp.ready := true.B
+
+  io.testRight.req.valid := state === s_learn && io.req.valid
+  io.testRight.req.bits.addr := io.req.bits
+  io.testRight.req.bits.testOffset := testOffset
+  io.testRight.req.bits.ptr := ptr
+  io.testRight.resp.ready := true.B
 
   for (off <- offsetList) {
     if (off < 0) {
@@ -278,17 +371,27 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule with HasPerfL
     val resp = Flipped(DecoupledIO(new PrefetchResp))
   })
 
-  val rrTable = Module(new RecentRequestTable)
+  val rrTableRight = Module(new RecentRequestTable)
+  val rrTableLeft = Module(new RecentRequestTable)
   val scoreTable = Module(new OffsetScoreTable)
+  val delayQueue = Module(new DelayQueue)
   val respQueue = Module(new Queue(new PrefetchResp, 16, flow=true))
   val prefetchOffset = scoreTable.io.prefetchOffset
   val oldAddr = io.train.bits.addr
   val newAddr = oldAddr + signedExtend((prefetchOffset << offsetBits), fullAddressBits)
 
-  rrTable.io.r <> scoreTable.io.test
   respQueue.io.enq <> io.resp
-  rrTable.io.w.valid := respQueue.io.deq.valid
-  rrTable.io.w.bits := Cat(Cat(respQueue.io.deq.bits.tag, respQueue.io.deq.bits.set) - signedExtend(prefetchOffset, setBits + fullTagBits), 0.U(offsetBits.W))
+  delayQueue.io.enq.valid := io.train.valid
+  delayQueue.io.enq.bits := Cat(io.train.bits.tag, io.train.bits.set)
+  delayQueue.io.deq.ready := true.B
+
+  rrTableLeft.io.r <> scoreTable.io.testLeft
+  rrTableLeft.io.w.valid := delayQueue.io.deq.valid
+  rrTableLeft.io.w.bits := Cat(delayQueue.io.deq.bits, 0.U(offsetBits.W))
+
+  rrTableRight.io.r <> scoreTable.io.testRight
+  rrTableRight.io.w.valid := false.B
+  rrTableRight.io.w.bits := Cat(Cat(respQueue.io.deq.bits.tag, respQueue.io.deq.bits.set) - signedExtend(prefetchOffset, setBits + fullTagBits), 0.U(offsetBits.W))
   scoreTable.io.req.valid := io.train.valid
   scoreTable.io.req.bits := oldAddr
 
@@ -301,8 +404,8 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule with HasPerfL
   when(scoreTable.io.req.fire) {
     req.tag := parseFullAddress(newAddr)._1
     req.set := parseFullAddress(newAddr)._2
-    req.needT := io.train.bits.needT
-    req.source := io.train.bits.source
+    req.needT  := DontCare
+    req.source := DontCare
     req_valid := !crossPage // stop prefetch when prefetch req crosses pages
   }
 
@@ -311,7 +414,7 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule with HasPerfL
   io.req.bits.isBOP := true.B
   io.train.ready := scoreTable.io.req.ready && (!req_valid || io.req.ready)
   io.resp.ready := true.B;dontTouch(io.resp.ready)
-  respQueue.io.deq.ready := rrTable.io.w.ready
+  respQueue.io.deq.ready := rrTableLeft.io.w.ready
 
   for (off <- offsetList) {
     if (off < 0) {

@@ -553,6 +553,7 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
     val req = Flipped(DecoupledIO(new PrefetchReq))
     val resp = DecoupledIO(new PrefetchReq)
     val evict = Flipped(DecoupledIO(new PrefetchEvict))
+    val from_bop = Input(Bool())
   })
 
   def idx(addr:      UInt) = addr(log2Up(fTableEntries) - 1, 0)
@@ -579,7 +580,7 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
   hit := readResult.valid && tag(pageAddr) === readResult.tag
   val hitForMap = hit && readResult.bitMap(blkOffset)
 
-  io.resp.valid := io.req.fire && !hitForMap
+  io.resp.valid := io.req.fire && (!hitForMap || io.from_bop)
   io.resp.bits := io.req.bits
 
   val wData = Wire(fTableEntry())
@@ -694,7 +695,7 @@ class PrefetchBranchV2()(implicit p: Parameters) extends PrefetchBranchV2Module 
   fTable.io.req.valid := q_spp.io.deq.fire || q_bop.io.deq.fire || sms.io.req.valid
   fTable.io.req.bits := Mux(sms.io.req.valid, sms.io.req.bits, 
                           Mux(q_bop.io.deq.fire, bop_req, spp_req))
-
+  fTable.io.from_bop := bop.io.req.valid
   io.req <> fTable.io.resp
 
   fTable.io.evict.valid := io.evict.valid
