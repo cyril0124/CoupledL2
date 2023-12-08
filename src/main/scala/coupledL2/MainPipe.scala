@@ -47,6 +47,14 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     /* block A at Entrance */
     val toReqBuf = Output(Vec(2, Bool()))
 
+    /* block A at ReqArb and ReqBuf */
+    val mpInfo = Vec(2,  ValidIO(new Bundle() {
+      val tag = UInt(tagBits.W)
+      val set = UInt(setBits.W)
+      val mshrTask = Bool()
+      val metaWen = Bool()
+    }))
+
     /* handle capacity conflict of GrantBuffer */
     val status_vec = Vec(3, ValidIO(new PipeStatus))
 
@@ -580,6 +588,16 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     task_s5_dups_valid(3) && bBlock(task_s5.bits, tag = true)
 
   io.toReqArb.blockA_s1 := io.toReqBuf(0) || io.toReqBuf(1)
+  io.mpInfo(0).valid := task_s2.valid
+  io.mpInfo(0).bits.set := task_s2.bits.set
+  io.mpInfo(0).bits.tag := task_s2.bits.tag
+  io.mpInfo(0).bits.mshrTask := task_s2.bits.mshrTask
+  io.mpInfo(0).bits.metaWen := task_s2.bits.metaWen
+  io.mpInfo(1).valid := task_s3.valid
+  io.mpInfo(1).bits.set := task_s3.bits.set
+  io.mpInfo(1).bits.tag := task_s3.bits.tag
+  io.mpInfo(1).bits.mshrTask := task_s3.bits.mshrTask
+  io.mpInfo(1).bits.metaWen := task_s3.bits.metaWen
 
   io.toReqArb.blockG_s1 := task_s2.valid && s23Block('g', task_s2.bits)
   /* ======== Pipeline Status ======== */

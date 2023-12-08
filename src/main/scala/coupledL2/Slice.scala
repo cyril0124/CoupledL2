@@ -68,6 +68,7 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   a_reqBuf.io.in <> sinkA.io.task
   a_reqBuf.io.mshrInfo := mshrCtl.io.msInfo
   a_reqBuf.io.mainPipeBlock := mainPipe.io.toReqBuf
+  a_reqBuf.io.mpInfo := mainPipe.io.mpInfo
   a_reqBuf.io.s1Entrance := reqArb.io.s1Entrance
   sinkB.io.s3Info := mainPipe.io.toSinkB
   sinkB.io.msInfo := mshrCtl.io.msInfo
@@ -76,6 +77,7 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   reqArb.io.sinkA <> a_reqBuf.io.out
   reqArb.io.ATag := a_reqBuf.io.ATag
   reqArb.io.ASet := a_reqBuf.io.ASet
+  reqArb.io.mpInfo := mainPipe.io.mpInfo
 
   reqArb.io.sinkB <> sinkB.io.task
   reqArb.io.sinkC <> sinkC.io.task
@@ -88,7 +90,6 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   reqArb.io.fromMainPipe := mainPipe.io.toReqArb
   reqArb.io.fromGrantBuffer := grantBuf.io.toReqArb
 
-  mshrCtl.io.fromReqArb.status_s1 := reqArb.io.status_s1
   mshrCtl.io.resps.sinkC := sinkC.io.resp
   mshrCtl.io.resps.sinkD := refillUnit.io.resp
   mshrCtl.io.resps.sinkE := grantBuf.io.e_resp

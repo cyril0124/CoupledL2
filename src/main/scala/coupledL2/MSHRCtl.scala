@@ -39,10 +39,7 @@ class MSHRSelector(implicit p: Parameters) extends L2Module {
 
 class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val io = IO(new Bundle() {
-    /* interact with req arb */
-    val fromReqArb = Input(new Bundle() {
-      val status_s1 = new PipeEntranceStatus
-    })
+
     val toReqArb = Output(new BlockInfo())
 
     /* interact with mainpipe */

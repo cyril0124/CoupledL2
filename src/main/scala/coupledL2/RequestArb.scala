@@ -33,6 +33,12 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
     val sinkA    = Flipped(DecoupledIO(new TaskBundle))
     val ATag     = Input(UInt(tagBits.W)) // !TODO: very dirty, consider optimize structure
     val ASet     = Input(UInt(setBits.W)) // To pass A entrance status to MP for blockA-info of ReqBuf
+    val mpInfo = Vec(2, Flipped(ValidIO(new Bundle() {
+      val tag = UInt(tagBits.W)
+      val set = UInt(setBits.W)
+      val mshrTask = Bool()
+      val metaWen = Bool()
+    })))
     val s1Entrance = ValidIO(new L2Bundle {
       val set = UInt(setBits.W)
     })
@@ -108,12 +114,21 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
   val B_task = io.sinkB.bits
   val C_task = io.sinkC.bits
 
+  // mp s2 and s3 block A req
+  val mp_blockA = Wire(Vec(2, Bool()))
+  io.mpInfo.zip(mp_blockA).foreach {
+    case (mp, blockA) =>
+      blockA := mp.valid && mp.bits.set === io.ASet && !(mp.bits.mshrTask && !mp.bits.metaWen)
+  }
+  val mp_blockA_s1 = mp_blockA(0) || mp_blockA(1)
+
+
   // B req cant input continuous
   val block_B_continuous = RegInit(false.B)
   block_B_continuous := io.sinkB.fire
 
   // block chnl
-  val block_A = io.fromMSHRCtl.blockA_s1 || io.fromMainPipe.blockA_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockA_s1
+  val block_A = io.fromMSHRCtl.blockA_s1 || mp_blockA_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockA_s1
   val block_B = io.fromMSHRCtl.blockB_s1 || io.fromMainPipe.blockB_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockB_s1 || block_B_continuous
   val block_C = io.fromMSHRCtl.blockC_s1 || io.fromMainPipe.blockC_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockC_s1
 
@@ -220,7 +235,7 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
     XSPerfAccumulate("sinkA_stall_by_mshr", io.sinkA.valid && io.fromMSHRCtl.blockA_s1)
     XSPerfAccumulate("sinkB_stall_by_mshr", io.sinkB.valid && io.fromMSHRCtl.blockB_s1)
 
-    XSPerfAccumulate("sinkA_stall_by_mainpipe", io.sinkA.valid && io.fromMainPipe.blockA_s1)
+    XSPerfAccumulate("sinkA_stall_by_mainpipe", io.sinkA.valid && mp_blockA_s1)
     XSPerfAccumulate("sinkB_stall_by_mainpipe", io.sinkB.valid && io.fromMainPipe.blockB_s1)
     XSPerfAccumulate("sinkC_stall_by_mainpipe", io.sinkC.valid && io.fromMainPipe.blockC_s1)
 

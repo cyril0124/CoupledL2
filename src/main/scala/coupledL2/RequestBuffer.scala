@@ -55,6 +55,13 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     val ATag        = Output(UInt(tagBits.W))
     val ASet        = Output(UInt(setBits.W))
 
+    val mpInfo = Vec(2, Flipped(ValidIO(new Bundle() {
+      val tag = UInt(tagBits.W)
+      val set = UInt(setBits.W)
+      val mshrTask = Bool()
+      val metaWen = Bool()
+    })))
+
     // when Probe/Release/MSHR enters MainPipe, we need also to block A req
     val s1Entrance = Flipped(ValidIO(new L2Bundle {
       val set = UInt(setBits.W)
@@ -62,6 +69,14 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
 
     val hasLatePF = Output(Bool())
   })
+
+  /* ======== mp s2 and s3 block A req ======== */
+  val mp_blockA = Wire(Vec(2, Bool()))
+  io.mpInfo.zip(mp_blockA).foreach {
+    case (mp, blockA) =>
+      blockA := mp.valid && mp.bits.set === io.in.bits.set && !(mp.bits.mshrTask && !mp.bits.metaWen)
+  }
+  val mp_blockA_s1 = mp_blockA(0) || mp_blockA(1)
 
   /* ======== Data Structure ======== */
 
@@ -107,7 +122,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   val in      = io.in.bits
   val full    = Cat(buffer.map(_.valid)).andR
   // flow not allowed when full, or entries might starve
-  val canFlow = flow.B && !full && !conflict(in) && !chosenQValid && !Cat(io.mainPipeBlock).orR
+  val canFlow = flow.B && !full && !conflict(in) && !chosenQValid && mp_blockA_s1
   val doFlow  = canFlow && io.out.ready
   io.hasLatePF := latePrefetch(in) && io.in.valid && !sameAddr(in, RegNext(in))
 
@@ -132,7 +147,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   val alloc = !full && io.in.valid && !doFlow && !dup
   when(alloc){
     val entry = buffer(insertIdx)
-    val mpBlock = Cat(io.mainPipeBlock).orR
+    val mpBlock = mp_blockA_s1
     val pipeBlockOut = io.out.fire && sameSet(in, io.out.bits)
     val probeBlock   = io.s1Entrance.valid && io.s1Entrance.bits.set === in.set // wait for same-addr req to enter MSHR
     val s1Block      = pipeBlockOut || probeBlock
@@ -143,8 +158,8 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     entry.task    := io.in.bits
     entry.waitMP  := Cat(
       s1Block,
-      io.mainPipeBlock(0),
-      io.mainPipeBlock(1),
+      mp_blockA(0),
+      mp_blockA(1),
       0.U(1.W))
     entry.waitMS  := conflictMask(in)
 
