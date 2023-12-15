@@ -103,7 +103,7 @@ class PrefetchIO(implicit p: Parameters) extends PrefetchBundle {
   val hint2llc = if(sppMultiLevelRefillOpt.nonEmpty)  Some(ValidIO(new PrefetchReq)) else None
 }
 
-class PrefetchQueue(implicit p: Parameters) extends PrefetchModule with HasPerfLogging{
+class PrefetchQueue(inflightEntries:Int = 32)(implicit p: Parameters) extends PrefetchModule with HasPerfLogging{
   val io = IO(new Bundle {
     val enq = Flipped(DecoupledIO(new PrefetchReq))
     val deq = DecoupledIO(new PrefetchReq)
@@ -240,14 +240,12 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
     case hyperPf: HyperPrefetchParams => // case spp +  bop + smsReceiver
       hasSpp = true
       val hybrid_pfts = Module(new HyperPrefetchDev2(parentName + "hpft_"))
-      val pftQueue = Module(new PrefetchQueue)
-      val delayQ = Module(new Queue(io.req.bits.cloneType, entries = 1, pipe = true, flow = false))
+      hybrid_pfts.io.l2_pf_en := RegNextN(io_l2_pf_en,2,Some(true.B))
+      hybrid_pfts.io.l2_pf_ctrl := RegNextN(io_l2_pf_ctrl,2,Some(0.U))
       hybrid_pfts.io.train <> io.train
       hybrid_pfts.io.resp <> io.resp
       hybrid_pfts.io.recv_addr := ValidIODelay(io.recv_addr, 2)
-      pftQueue.io.enq <> hybrid_pfts.io.req
-      delayQ.io.enq <> pftQueue.io.deq
-      io.req <> delayQ.io.deq
+      io.req <> hybrid_pfts.io.req
       io.evict match {
         case Some(evict) =>
         hybrid_pfts.io.evict <> evict

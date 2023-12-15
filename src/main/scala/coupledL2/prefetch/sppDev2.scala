@@ -1168,6 +1168,8 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
     val resp = Flipped(DecoupledIO(new PrefetchResp))
     val evict = Flipped(DecoupledIO(new PrefetchEvict))
     val recv_addr = Flipped(ValidIO(UInt(64.W)))
+    val l2_pf_en = Input(Bool())
+    val l2_pf_ctrl = Input(UInt(Csr_PfCtrlBits.W))
   })
 
   val fTable = Module(new FilterTable)
@@ -1332,8 +1334,15 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   q_bop.io.deq.ready := fTable.io.req.ready && !q_sms.io.deq.valid
   q_spp.io.deq.ready := fTable.io.req.ready && !q_sms.io.deq.valid && !q_bop.io.deq.valid
 
-  io.req <> fTable.io.resp
+  //send to prefetchQueue
+  val pftQueue = Module(new PrefetchQueue(inflightEntries = hyperParams.inflightEntries))
+  val delayQ = Module(new Queue(io.req.bits.cloneType, entries = 1, pipe = true, flow = false))
+  pftQueue.io.enq <> fTable.io.resp
+  delayQ.io.enq <> pftQueue.io.deq
 
+  io.req.valid := delayQ.io.deq.valid && io.l2_pf_en
+  io.req.bits := delayQ.io.deq.bits
+  delayQ.io.deq.ready := io.req.ready
   // io.req <> q_bop.io.deq
   fTable.io.evict.valid := false.B//io.evict.valid
   fTable.io.evict.bits := io.evict.bits
