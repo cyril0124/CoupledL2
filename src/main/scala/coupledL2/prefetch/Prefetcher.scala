@@ -43,11 +43,11 @@ class PrefetchReq(implicit p: Parameters) extends PrefetchBundle {
   val pfVec = UInt(PfVectorConst.bits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
   def tag_set = Cat(tag,set)
-  def is_l1pf = pfVec === PfSource.SMS
-  def is_l2pf = pfVec === PfSource.BOP || pfVec === PfVectorConst.DEFAULT
-  def hasSMS = (pfVec & PfSource.SMS) === PfSource.SMS
-  def hasBOP = (pfVec & PfSource.BOP) === PfSource.BOP
-  def hasSPP = (pfVec & PfSource.SPP) === PfSource.SPP
+  def hasSMS =  pfVec(PfVectorConst.SMS)
+  def hasBOP =  pfVec(PfVectorConst.BOP)
+  def hasSPP =  pfVec(PfVectorConst.SPP)
+  def is_l1pf = pfVec(PfVectorConst.SMS)
+  def is_l2pf = pfVec(PfVectorConst.BOP) | pfVec(PfVectorConst.SPP)
 }
 
 class PrefetchResp(implicit p: Parameters) extends PrefetchBundle {
@@ -56,8 +56,11 @@ class PrefetchResp(implicit p: Parameters) extends PrefetchBundle {
   val set = UInt(setBits.W)
   val pfVec = UInt(PfVectorConst.bits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
-  def hasBOP = (pfVec & PfSource.BOP) === PfSource.BOP
-  def hasSPP = (pfVec & PfSource.SPP) === PfSource.SPP
+  def hasSMS =  pfVec(PfVectorConst.SMS)
+  def hasBOP =  pfVec(PfVectorConst.BOP)
+  def hasSPP =  pfVec(PfVectorConst.SPP)
+  def is_l1pf = pfVec(PfVectorConst.SMS)
+  def is_l2pf = pfVec(PfVectorConst.BOP) | pfVec(PfVectorConst.SPP)
   def hasSPPBOP = pfVec === PfSource.BOP_SPP
 }
 
@@ -75,12 +78,12 @@ class PrefetchTrain(implicit p: Parameters) extends PrefetchBundle {
   val pfVec = UInt(PfVectorConst.bits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
   def blkAddr = addr(fullAddressBits-1,offsetBits)
-  def hasSMS =  (pfVec & PfSource.SMS) === PfSource.SMS
-  def hasBOP = (pfVec & PfSource.BOP) === PfSource.BOP
-  def hasSPP = (pfVec & PfSource.SPP) === PfSource.SPP
+  def hasSMS =  pfVec(PfVectorConst.SMS)
+  def hasBOP =  pfVec(PfVectorConst.BOP)
+  def hasSPP =  pfVec(PfVectorConst.SPP)
+  def is_l1pf = pfVec(PfVectorConst.SMS)
+  def is_l2pf = pfVec(PfVectorConst.BOP) | pfVec(PfVectorConst.SPP)
   def hasSPPBOP = pfVec === PfSource.BOP_SPP
-  def is_l1pf = pfVec === PfSource.SMS
-  def is_l2pf = pfVec === PfSource.BOP || pfVec === PfVectorConst.DEFAULT
 }
 
 class PrefetchEvict(implicit p: Parameters) extends PrefetchBundle {
@@ -108,6 +111,7 @@ class PrefetchQueue(inflightEntries:Int = 32)(implicit p: Parameters) extends Pr
     val enq = Flipped(DecoupledIO(new PrefetchReq))
     val deq = DecoupledIO(new PrefetchReq)
     val used = Output(UInt(6.W))
+    val queue_used = Output(UInt(log2Ceil(inflightEntries).W))
   })
   /*  Here we implement a queue that
    *  1. is pipelined  2. flows
@@ -141,7 +145,7 @@ class PrefetchQueue(inflightEntries:Int = 32)(implicit p: Parameters) extends Pr
   io.enq.ready := true.B
   io.deq.valid := !empty || io.enq.valid
   io.deq.bits := Mux(empty, io.enq.bits, queue(head))
-
+  io.queue_used := RegEnable(PopCount(valids.asUInt),io.enq.valid)
   io.used := PopCount(valids.asUInt)
 
   // The reqs that are discarded = enq - deq

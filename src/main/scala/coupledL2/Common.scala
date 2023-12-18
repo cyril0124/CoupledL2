@@ -42,16 +42,16 @@ trait HasChannelBits { this: Bundle =>
 object PfSource extends Enumeration {
   val bits = 3
   val NONE    = "b000".U(bits.W)
-  val BOP     = "b001".U(bits.W)
-  val SPP     = "b010".U(bits.W)
-  val SMS     = "b100".U(bits.W)
-  val BOP_SPP = "b011".U(bits.W)
+  val SMS     = "b001".U(bits.W)
+  val BOP     = "b010".U(bits.W)
+  val SPP     = "b100".U(bits.W)
+  val BOP_SPP = "b110".U(bits.W)
 
 }
 object PfVectorConst extends {
-  val BOP = 0
-  val SPP = 1
-  val SMS = 2
+  val SMS = 0
+  val BOP = 1
+  val SPP = 2
 
   val bits = 3
   val DEFAULT = 0.U(bits.W)
