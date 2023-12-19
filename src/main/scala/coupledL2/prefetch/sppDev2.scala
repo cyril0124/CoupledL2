@@ -465,16 +465,16 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   // val q = Module(new Queue(chiselTypeOf(io.req.bits), pTableQueueEntries, flow = true, pipe = false))
   val q = Module(new ReplaceableQueueV2(chiselTypeOf(io.req.bits), pTableQueueEntries))
   q.io.enq <> io.req
+  val issue_valid = RegNext(q.io.deq.fire,false.B)
   val issueReq = RegInit(0.U.asTypeOf(new SignatureTableResp))
-  when(q.io.deq.valid){
+  when(q.io.deq.fire){
     issueReq := q.io.deq.bits
   }
   val s_idle :: s_lookahead0 :: s_lookahead :: Nil = Enum(3)
   val state = RegInit(s_idle)
-  q.io.deq.ready := state === s_idle
   val s2_enprefetch = WireInit(false.B)
   val s2_enprefetchnl = WireInit(false.B)
-
+  q.io.deq.ready := state === s_idle
   //read pTable
   // --------------------------------------------------------------------------------
   // stage 0
@@ -489,8 +489,9 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
       //-4 Mux(q.io.empty, slowLookTable(s0_lookCount), s0_lookCount) ,considering receive queue used situation
     //4. calculate s0_current new data entry
   val s1_s0_continue = WireInit(false.B)
+  val s1_s0_hit = WireInit(false.B)
   val s0_first_flag = RegNext(state === s_lookahead0,false.B)
-  val s0_valid = WireInit(q.io.deq.fire || (state === s_lookahead && (s0_first_flag || s1_s0_continue)))
+  val s0_valid = WireInit(issue_valid || (state === s_lookahead && (s0_first_flag || s1_s0_continue)))
   val s0_current = WireInit(0.U.asTypeOf(new SignatureTableResp));dontTouch(s0_current)
   val s0_lookCount = WireInit(0.U(lookCountBits.W));dontTouch(s0_lookCount)
   val s0_miniCount = WireInit(0.U(lookCountBits.W));dontTouch(s0_miniCount)
@@ -502,13 +503,16 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   val s1_current = WireInit(0.U.asTypeOf(new SignatureTableResp));dontTouch(s1_current)
   val s1_valid = WireInit(false.B)
   //forward hold dequeue data
-  s1_s0_continue := RegNext(s1_continue,0.U)
+  s1_s0_continue := RegNext(s1_continue,false.B) && s1_s0_hit
   val s1_s0_bypass_sig = RegNext(s1_current.signature,0.U)
   val s1_s0_bypass_block = RegNext(s1_current.block,0.U)
   val s1_s0_bypass_delta = RegNext(s1_maxEntry.delta,0.S)
   val s1_s0_bypass_lookCount = RegNext(s1_lookCount,0.U)
+  val s1_s0_bypass_valid = RegNext(s1_readResult.valid,false.B)
+  val s1_s0_bypass_tag = RegNext(s1_readResult.tag,0.U)
   //temporary calculate only for machine control
   val s1_s0_testBlock = WireInit((s1_s0_bypass_block.asSInt + s1_s0_bypass_delta).asUInt);dontTouch(s1_s0_testBlock)
+ s1_s0_hit := s1_s0_bypass_valid && (get_tag(s1_s0_bypass_sig) === s1_s0_bypass_tag)
   //| signature | delta | block |
   s0_lookCount := s1_s0_bypass_lookCount
 
@@ -532,7 +536,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   // val s0_miniCount = s0_lookCount // test2
   s0_miniCount := Mux(q.io.empty && io.ctrl.en_slowLookUp, slowLookTable(s0_lookCount), s0_lookCount) // test3
 
-  pTable.io.r.req.valid := q.io.deq.fire || (s0_valid && state === s_lookahead)
+  pTable.io.r.req.valid := issue_valid || (s0_valid && state === s_lookahead)
   pTable.io.r.req.bits.setIdx := get_idx(s0_current.signature)
   // --------------------------------------------------------------------------------
   // stage 1
@@ -590,6 +594,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   val s2_valid = RegNext(s1_valid,false.B)
   val s2_lookCount = RegNext(s1_lookCount,0.U)
   val s2_state = RegNext(state,s_idle)
+  val s2_first_flag = RegNextN(s0_first_flag,2,Some(false.B))
   val s2_write_valid = RegNext(s2_can_write,false.B)
   //these should hold
   val s2_current = RegEnable(s1_current,s1_valid)
@@ -611,7 +616,16 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
 
   //set output
   val ghr_shareBO = WireInit(Mux(io.ctrl.en_shareBO,Mux(io.from_ghr.shareBO > 0.S, io.from_ghr.shareBO + 1.S, io.from_ghr.shareBO - 1 .S),1.S))
-  val s2_delta_list = s2_readResult.deltaEntries.map(x => Mux(x.cDelta > s0_miniCount.asUInt, x.delta, 0.S))
+  val s2_delta_list = s2_readResult.deltaEntries.map(x => Mux(x.cDelta > s0_miniCount.asUInt,
+  Mux(io.ctrl.en_shareBO,
+    ParallelPriorityMux(
+      Seq(
+        (x.delta > 0.S && ghr_shareBO > 0.S )-> (x.delta + ghr_shareBO),
+        (x.delta < 0.S && ghr_shareBO < 0.S) -> (x.delta + ghr_shareBO),
+        (x.delta > 0.S && ghr_shareBO < 0.S) -> (x.delta - ghr_shareBO),
+        (x.delta < 0.S && ghr_shareBO > 0.S) -> (x.delta - ghr_shareBO),
+    )),x.delta),
+     0.S))
   val s2_delta_list_checked = WireInit(VecInit(Seq.fill(pTableDeltaEntries)(0.S((blkOffsetBits + 1).W))))
   s2_delta_list_checked := s2_delta_list.map(x => Mux(is_samePage((s2_current.block.asSInt + x).asUInt, s2_current.block), x, 0.S))
   val s2_delta_list_nl = WireInit(VecInit(Seq.fill(pTableDeltaEntries)(0.S((blkOffsetBits + 1).W))));dontTouch(s2_delta_list_nl)
@@ -622,7 +636,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   val s2_issued = s2_delta_list_checked.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _)
   val s2_testBlock = WireInit((s2_current.block.asSInt + s2_maxEntry.delta).asUInt)
   s2_enprefetch := s2_valid && s2_hit && s2_issued =/= 0.U && s2_state === s_lookahead && is_samePage(s2_testBlock,s2_current.block)
-  when(s2_valid && s2_lookCount === 0.U && s2_state === s_lookahead && (!s2_enprefetch || io.ctrl.en_Nextline_Agreesive)) {
+  when(s2_valid && s2_first_flag && (!s2_enprefetch || io.ctrl.en_Nextline_Agreesive)) {
     s2_enprefetchnl := ENABLE_NL.B && is_samePage(s2_NL_blkAddr.head, s2_current.block)
   }
 
@@ -660,7 +674,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
 
   pTable.io.w.req.valid := RegNextN(s2_write_valid,1) //&& !issueReq.isBP
   pTable.io.w.req.bits.setIdx := RegEnable(get_idx(issueReq.signature),0.U,s2_write_valid)
-  pTable.io.w.req.bits.data(0) := s2_wEntry
+  pTable.io.w.req.bits.data(0) := RegEnable(s2_wEntry,0.U.asTypeOf(new pTableEntry()),s2_write_valid)
   
   //update bp
   io.pt2st_bp.valid := ENABLE_BP.asBool && s2_bp_update
@@ -898,10 +912,11 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     def toC = 3.U(bits.W)
 
     def None          = 0.U(bits.W)
-    def BOP           = 1.U(bits.W)
-    def SPP           = 2.U(bits.W)
-    def SMS           = 4.U(bits.W)
-    def COMMON        = 3.U(bits.W)
+    def SMS           = 1.U(bits.W)
+    def BOP           = 2.U(bits.W)
+    def SPP           = 4.U(bits.W)
+
+    def COMMON        = 7.U(bits.W)
 
     //TODO: further study, is need bop update filterTable?
     // def getVecState(isHit:Bool, originV:UInt, trigerId:UInt) = (originV | trigerId) & ~(BOP)
