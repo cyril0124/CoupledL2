@@ -46,6 +46,8 @@ class PrefetchReq(implicit p: Parameters) extends PrefetchBundle {
   def hasSMS =  pfVec(PfVectorConst.SMS)
   def hasBOP =  pfVec(PfVectorConst.BOP)
   def hasSPP =  pfVec(PfVectorConst.SPP)
+  def get_pageAddr = addr(fullAddressBits - 1, pageOffsetBits)
+  def get_blockOff = addr(pageOffsetBits - 1, offsetBits)
   def is_l1pf = pfVec(PfVectorConst.SMS)
   def is_l2pf = pfVec(PfVectorConst.BOP) | pfVec(PfVectorConst.SPP)
 }
