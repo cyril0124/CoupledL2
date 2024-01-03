@@ -34,7 +34,7 @@ case object L2ParamKey extends Field[L2Param](L2Param())
 case class L1Param
 (
   name: String = "L1D",
-  sets: Int = 32,
+  sets: Int = 64,
   ways: Int = 8,
   blockBytes: Int = 64,
   aliasBitsOpt: Option[Int] = None,

@@ -253,6 +253,9 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
     val bankBits = if (banks == 1) 0 else log2Up(banks)
     val io = IO(new Bundle {
       val dfx_reset = Input(new DFTResetSignals())
+      /* debug signals */
+//       val fpga_dbg = Vec(banks, Vec(mshrsAll, ValidIO(new L2MSHRDbgSignal)))
+      val fpga_dbg = Vec(banks, Vec(mshrsAll, ValidIO(new L2MSHRDbgSignal)))
     })
 
     // Display info
@@ -364,6 +367,10 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
           case BankBitsKey => bankBits
           case SliceIdKey => i
         }))
+
+        // debug signals
+        io.fpga_dbg(i) := RegNext(slice.io.fpga_dbg)
+
         slice.io.in <> in
         in.b.bits.address := restoreAddress(slice.io.in.b.bits.address, i)
         out <> slice.io.out
@@ -480,6 +487,12 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
         }
       }
     }
+
+    // debug signals
+//    io.fpga_dbg.zip(slices).foreach {
+//      case (dbg, s) => dbg := s.io.fpga_dbg
+//    }
+//    io.fpga_dbg := DontCare
 
     if(cacheParams.enablePerf) {
       val grant_fire = slices.map{ slice => {
