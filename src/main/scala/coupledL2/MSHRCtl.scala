@@ -88,6 +88,9 @@ class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
 
     /* for TopDown Monitor */
     val msStatus = topDownOpt.map(_ => Vec(mshrsAll, ValidIO(new MSHRStatus)))
+
+    /* debug signals */
+    val fpga_dbg = Vec(mshrsAll, ValidIO(new L2MSHRDbgSignal))
   })
 
   val mshrs = Seq.fill(mshrsAll) { Module(new MSHR()) }
@@ -131,6 +134,9 @@ class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
       m.io.nestedwb := io.nestedwb
       m.io.bMergeTask.valid := io.bMergeTask.valid && io.bMergeTask.bits.id === i.U
       m.io.bMergeTask.bits := io.bMergeTask.bits
+
+      // debug signals
+      io.fpga_dbg(i) := m.io.fpga_dbg
   }
 
   val latency = 1 // stall latency cycle for timing
