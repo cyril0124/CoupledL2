@@ -611,7 +611,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     // But to consider mshrFull, all channel_reqs are needed
   )
   io.status_vec(0).bits.channel := task_s3.bits.channel
-  io.status_vec(1).valid        := task_s4.valid && isD_s4 && !need_write_releaseBuf_s4 && !need_write_refillBuf_s4
+  io.status_vec(1).valid        := task_s4.valid
   io.status_vec(1).bits.channel := task_s4.bits.channel
   io.status_vec(2).valid        := d_s5.valid
   io.status_vec(2).bits.channel := task_s5.bits.channel
