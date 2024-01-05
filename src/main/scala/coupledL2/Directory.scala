@@ -29,8 +29,7 @@ import xs.utils.perf.HasPerfLogging
 import xs.utils.sram.SRAMTemplate
 import chisel3.util.random.LFSR
 
-
-class MetaEntry(implicit p: Parameters) extends L2Bundle {
+class MetaEntryWithoutPfVec(implicit p: Parameters) extends L2Bundle {
   val dirty = Bool()
   val state = UInt(stateBits.W)
   val clients = UInt(clientBits.W)  // valid-bit of clients
@@ -42,6 +41,44 @@ class MetaEntry(implicit p: Parameters) extends L2Bundle {
   def =/=(entry: MetaEntry): Bool = {
     this.asUInt =/= entry.asUInt
   }
+
+  def toMetaEntry(pfVec: UInt) = {
+    val entry = Wire(new MetaEntry)
+    entry.dirty := dirty
+    entry.state := state
+    entry.clients := clients
+    entry.alias.foreach(_ := alias.getOrElse(0.U))
+    entry.prefetch.foreach(_ := prefetch.getOrElse(false.B))
+    entry.pfVec.foreach(_ := pfVec)
+    entry.accessed := accessed
+    entry
+  }
+}
+
+class MetaEntry(implicit p: Parameters) extends L2Bundle {
+  val dirty = Bool()
+  val state = UInt(stateBits.W)
+  val clients = UInt(clientBits.W)  // valid-bit of clients
+  // TODO: record specific state of clients instead of just 1-bit
+  val alias = aliasBitsOpt.map(width => UInt(width.W)) // alias bits of client
+  val prefetch = if (hasPrefetchBit) Some(Bool()) else None // whether block is prefetched
+  val pfVec = if (hasPrefetchBit)  prefetchOpt.map(_ => UInt(PfVectorConst.bits.W)) else None // prefetch state
+  val accessed = Bool()
+
+  def =/=(entry: MetaEntry): Bool = {
+    this.asUInt =/= entry.asUInt
+  }
+
+  def toWithoutPfVec() = {
+    val entry = Wire(new MetaEntryWithoutPfVec)
+    entry.dirty := dirty
+    entry.state := state
+    entry.clients := clients
+    entry.alias.foreach(_ := alias.getOrElse(0.U))
+    entry.prefetch.foreach(_ := prefetch.getOrElse(false.B))
+    entry.accessed := accessed
+    entry
+  }
 }
 
 object MetaEntry {
@@ -50,17 +87,20 @@ object MetaEntry {
     init
   }
   def apply(dirty: Bool, state: UInt, clients: UInt, alias: Option[UInt],
-            prefetch: Bool = false.B, accessed: Bool = false.B)(implicit p: Parameters) = {
+//            prefetch: Bool = false.B, accessed: Bool = false.B)(implicit p: Parameters) = {
+             prefetch: Bool = false.B, pfVec: UInt = PfVectorConst.DEFAULT, accessed: Bool = false.B)(implicit p: Parameters) = {
     val entry = Wire(new MetaEntry)
     entry.dirty := dirty
     entry.state := state
     entry.clients := clients
     entry.alias.foreach(_ := alias.getOrElse(0.U))
     entry.prefetch.foreach(_ := prefetch)
+    entry.pfVec.foreach(_ := pfVec)
     entry.accessed := accessed
     entry
   }
 }
+
 
 class DirRead(implicit p: Parameters) extends L2Bundle {
   val tag = UInt(tagBits.W)
@@ -126,12 +166,15 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
   dontTouch(debug_addr_replResp)
 
 
-  def invalid_way_sel(metaVec: Seq[MetaEntry], repl: UInt) = {
+  def invalid_way_sel(metaVec: Seq[MetaEntryWithoutPfVec], repl: UInt) = {
     val invalid_vec = metaVec.map(_.state === MetaData.INVALID)
     val has_invalid_way = Cat(invalid_vec).orR
     val way = ParallelPriorityMux(invalid_vec.zipWithIndex.map(x => x._1 -> x._2.U(wayBits.W)))
     (has_invalid_way, way)
   }
+
+  val pfVecResp = WireInit(PfVectorConst.DEFAULT)
+  val pfVecReplResp = WireInit(PfVectorConst.DEFAULT)
 
   val sets = cacheParams.sets
   val ways = cacheParams.ways
@@ -144,11 +187,12 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
   val tagArray  = Module(new BankedSRAM(UInt(tagBits.W), sets, ways, banks, singlePort = true,
     hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
     enableClockGate = enableClockGate, parentName = parentName + "tag_"))
-  val metaArray = Module(new SRAMTemplate(new MetaEntry, sets, ways, singlePort = true,
+  val metaArray = Module(new SRAMTemplate(new MetaEntryWithoutPfVec, sets, ways, singlePort = true,
     hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
     hasClkGate = enableClockGate, parentName = parentName + "meta_"))
+
   val tagRead = Wire(Vec(ways, UInt(tagBits.W)))
-  val metaRead = Wire(Vec(ways, new MetaEntry()))
+  val metaRead = Wire(Vec(ways, new MetaEntryWithoutPfVec()))
 
   val resetFinish = RegInit(false.B)
   val resetIdx = RegInit((sets - 1).U)
@@ -194,7 +238,7 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
   metaRead := metaArray.io.r(io.read.fire, io.read.bits.set).resp.data
   metaArray.io.w(
     metaWen,
-    io.metaWReq.bits.wmeta,
+    io.metaWReq.bits.wmeta.toWithoutPfVec(),
     io.metaWReq.bits.set,
     io.metaWReq.bits.wayOH
   )
@@ -233,7 +277,7 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
 
   io.resp.hit   := hit_s3
   io.resp.way   := way_s3
-  io.resp.meta  := meta_s3
+  io.resp.meta  := meta_s3.toMetaEntry(pfVecResp)
   io.resp.tag   := tag_s3
   io.resp.set   := set_s3
   io.resp.error := false.B  // depends on ECC
@@ -276,7 +320,7 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
   io.replResp.bits.tag := tagAll_s3(finalWay)
   io.replResp.bits.set := req_s3.set
   io.replResp.bits.way := finalWay
-  io.replResp.bits.meta := metaAll_s3(finalWay)
+  io.replResp.bits.meta := metaAll_s3(finalWay).toMetaEntry(pfVecReplResp)
   io.replResp.bits.mshrId := req_s3.mshrId
   io.replResp.bits.retry := refillRetry
 
@@ -359,6 +403,19 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
       Mux(resetFinish, set_s3, resetIdx),
       1.U
     )
+  }
+
+  if (prefetchOpt.isDefined) {
+    val pfVecArray = RegInit(VecInit(Seq.fill(sets)(VecInit(Seq.fill(ways)(0.U.asTypeOf(UInt(PfVectorConst.bits.W)))))))
+    when(metaWen) {
+      pfVecArray(io.metaWReq.bits.set)(OHToUInt(io.metaWReq.bits.wayOH)) := io.metaWReq.bits.wmeta.pfVec.get
+    }
+    val result = RegInit(VecInit(Seq.fill(ways)(0.U.asTypeOf(UInt(PfVectorConst.bits.W)))))
+    when(reqValid_s2){
+      result := pfVecArray(req_s2.set)
+    }
+    pfVecResp := result(way_s3)
+    pfVecReplResp := result(finalWay)
   }
 
   /* ====== Reset ====== */
