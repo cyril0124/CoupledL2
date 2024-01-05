@@ -303,24 +303,10 @@ class L2MSHRDbgSignal extends Bundle {
   val state = UInt(3.W)
   val clients = UInt(1.W) // valid-bit of clients
   // state mes
-  // schedule
-  val s_acquire = Bool() // acquire downwards
-  val s_rprobe = Bool() // probe upwards, caused by replace
-  val s_pprobe = Bool() // probe upwards, casued by probe
-  val s_release = Bool() // release downwards
-  val s_probeack = Bool() // respond probeack downwards
-  val s_refill = Bool() // respond grant upwards
-  val s_merge_probeack = Bool() // respond probeack downwards, Probe merge into A-replacement-Release
-  // wait
-  val w_rprobeackfirst = Bool()
-  val w_rprobeacklast = Bool()
-  val w_pprobeackfirst = Bool()
-  val w_pprobeacklast = Bool()
-  val w_pprobeack = Bool()
-  val w_grantfirst = Bool()
-  val w_grantlast = Bool()
-  val w_grant = Bool()
-  val w_releaseack = Bool()
-  val w_grantack = Bool()
-  val w_replResp = Bool()
+  val mshr_state = UInt(18.W)
+}
+
+class L2GrantBufDbgSignal extends Bundle{
+  val d_task_valid = Bool()
+  val full = Bool()
 }

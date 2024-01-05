@@ -41,7 +41,8 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
     val latePF = topDownOpt.map(_ => Output(Bool()))
     val eccError = Output(Bool())
     /* debug signals */
-    val fpga_dbg = Vec(mshrsAll, ValidIO(new L2MSHRDbgSignal))
+    val mshrsState = Vec(mshrsAll, ValidIO(new L2MSHRDbgSignal))
+    val grantBufSiganl = Output(new L2GrantBufDbgSignal)
   })
 
   val reqArb = Module(new RequestArb())
@@ -64,7 +65,8 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
     cacheParams.hasMbist && cacheParams.hasShareBus
   )
 
-  io.fpga_dbg := mshrCtl.io.fpga_dbg
+  io.mshrsState := mshrCtl.io.fpga_dbg
+  io.grantBufSiganl := grantBuf.io.fpga_dbg
 
   val prbq = Module(new ProbeQueue())
   prbq.io <> DontCare // @XiaBin TODO

@@ -99,25 +99,10 @@ class MSHR(implicit p: Parameters) extends L2Module {
   io.fpga_dbg.bits.clients := dirResult.meta.clients // valid-bit of clients
   // state mes
   // schedule
-  io.fpga_dbg.bits.s_acquire := state_dups(0).s_acquire // acquire downwards
-  io.fpga_dbg.bits.s_rprobe := state_dups(0).s_rprobe // probe upwards, caused by replace
-  io.fpga_dbg.bits.s_pprobe := state_dups(0).s_pprobe // probe upwards, casued by probe
-  io.fpga_dbg.bits.s_release := state_dups(0).s_release // release downwards
-  io.fpga_dbg.bits.s_probeack := state_dups(0).s_probeack // respond probeack downwards
-  io.fpga_dbg.bits.s_refill := state_dups(0).s_refill // respond grant upwards
-  io.fpga_dbg.bits.s_merge_probeack := state_dups(0).s_merge_probeack // respond probeack downwards, Probe merge into A-replacement-Release
-  // wait
-  io.fpga_dbg.bits.w_rprobeackfirst := state_dups(0).w_rprobeackfirst
-  io.fpga_dbg.bits.w_rprobeacklast := state_dups(0).w_rprobeacklast
-  io.fpga_dbg.bits.w_pprobeackfirst := state_dups(0).w_pprobeackfirst
-  io.fpga_dbg.bits.w_pprobeacklast := state_dups(0).w_pprobeacklast
-  io.fpga_dbg.bits.w_pprobeack := state_dups(0).w_pprobeack
-  io.fpga_dbg.bits.w_grantfirst := state_dups(0).w_grantfirst
-  io.fpga_dbg.bits.w_grantlast := state_dups(0).w_grantlast
-  io.fpga_dbg.bits.w_grant := state_dups(0).w_grant
-  io.fpga_dbg.bits.w_releaseack := state_dups(0).w_releaseack
-  io.fpga_dbg.bits.w_grantack := state_dups(0).w_grantack
-  io.fpga_dbg.bits.w_replResp := state_dups(0).w_replResp
+  io.fpga_dbg.bits.mshr_state := Cat(state_dups(0).s_acquire, state_dups(0).s_rprobe, state_dups(0).s_pprobe, state_dups(0).s_release, state_dups(0).s_probeack, state_dups(0).s_refill, state_dups(0).s_merge_probeack,
+    state_dups(0).w_rprobeackfirst, state_dups(0).w_rprobeacklast, state_dups(0).w_pprobeackfirst, state_dups(0).w_pprobeacklast, state_dups(0).w_pprobeack, state_dups(0).w_grantfirst, state_dups(0).w_grantlast,
+    state_dups(0).w_grant, state_dups(0).w_releaseack, state_dups(0).w_grantack, state_dups(0).w_replResp)
+
 
 
   when(io.alloc.valid) {
