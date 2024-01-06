@@ -116,7 +116,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   val dtaskOpcode = io.d_task.bits.task.opcode
   // The following is organized in the order of data flow
   // =========== save d_task in queue[FIFO] ===========
-  val grantQueue = Module(new SRAMQueue(new TLBundleDwithBeat1(), entries = mshrsAll, flow = true,
+  val grantQueue = Module(new SRAMQueue(new TLBundleDwithBeat1(), entries = mshrsAll/bufferReductionFactor, flow = true,
      hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
      hasClkGate = enableClockGate, parentName = parentName))
   grantQueue.io.enq.valid := io.d_task.valid && dtaskOpcode =/= HintAck
@@ -238,10 +238,10 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
 
   val noSpaceForSinkReq = PopCount(VecInit(io.pipeStatusVec.tail.map { case s =>
     s.valid && (s.bits.fromA || s.bits.fromC)
-  }).asUInt) + grantQueueCnt >= mshrsAll.U - latency
+  }).asUInt) + grantQueueCnt >= (mshrsAll/bufferReductionFactor).U - latency
   val noSpaceForMSHRReq = PopCount(VecInit(io.pipeStatusVec.map { case s =>
     s.valid && s.bits.fromA
-  }).asUInt) + grantQueueCnt >= mshrsAll.U - latency
+  }).asUInt) + grantQueueCnt >= (mshrsAll/bufferReductionFactor).U - latency
   // TODO: only block mp_grant and acuqire
   val noSpaceForWaitSinkE = PopCount(Cat(VecInit(io.pipeStatusVec.tail.map { case s =>
     s.valid && s.bits.fromA

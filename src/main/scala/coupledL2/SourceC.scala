@@ -131,17 +131,17 @@ class SourceC(implicit p: Parameters) extends L2Module with HasPerfLogging{
   })
 
   // We must keep SourceC FIFO, so a queue is used
-  val queue = Module(new Queue(io.in.bits.cloneType, entries = mshrsAll, flow = true))
+  val queue = Module(new Queue(io.in.bits.cloneType, entries = mshrsAll/bufferReductionFactor, flow = true))
   queue.io.enq <> io.in
   // Add back pressure logic from SourceC
   // refer to GrantBuffer
   val sourceCQueueCnt = queue.io.count
   val noSpaceForSinkBReq = PopCount(VecInit(io.pipeStatusVec.tail.map { case s =>
     s.valid && (s.bits.fromA || s.bits.fromB)
-  }).asUInt) + sourceCQueueCnt >= mshrsAll.U
+  }).asUInt) + sourceCQueueCnt >= (mshrsAll/bufferReductionFactor).U
   val noSpaceForMSHRReq = PopCount(VecInit(io.pipeStatusVec.tail.map { case s =>
     s.valid && (s.bits.fromA || s.bits.fromB)
-  }).asUInt) + sourceCQueueCnt >= (mshrsAll - 1).U
+  }).asUInt) + sourceCQueueCnt >= (mshrsAll/bufferReductionFactor - 1).U
 
   io.toReqArb.blockSinkBReqEntrance := noSpaceForSinkBReq
   io.toReqArb.blockMSHRReqEntrance := noSpaceForMSHRReq

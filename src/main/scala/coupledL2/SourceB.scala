@@ -63,7 +63,7 @@ class SourceB(implicit p: Parameters) extends L2Module with HasPerfLogging{
 
   /* ======== Data Structure ======== */
   // TODO: check XSPerf whether 4 entries is enough
-  val entries = 4
+  val entries = 4/bufferReductionFactor
   val probes  = RegInit(VecInit(
     Seq.fill(entries)(0.U.asTypeOf(new ProbeEntry))
   ))

@@ -43,7 +43,7 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   })
 
   val reqArb = Module(new RequestArb())
-  val a_reqBuf = Module(new RequestBuffer)
+  val a_reqBuf = Module(new RequestBuffer(entries = 4/bufferReductionFactor))
   val mainPipe = Module(new MainPipe())
   val mshrCtl = Module(new MSHRCtl())
   val directory = Module(new Directory(parentName + "dir_"))

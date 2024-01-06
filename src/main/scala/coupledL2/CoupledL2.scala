@@ -38,6 +38,8 @@ trait HasCoupledL2Parameters {
   val p: Parameters
   val cacheParams = p(L2ParamKey)
 
+  val bufferReductionFactor = 4
+
   val blocks = cacheParams.sets * cacheParams.ways
   val blockBytes = cacheParams.blockBytes
   val beatBytes = cacheParams.channelBytes.d.get
@@ -54,7 +56,7 @@ trait HasCoupledL2Parameters {
                   else cacheParams.clientCaches.head.vaddrBitsOpt
   val pageOffsetBits = log2Ceil(cacheParams.pageBytes)
 
-  val bufBlocks = 8 // hold data that flows in MainPipe (4)
+  val bufBlocks = 8/bufferReductionFactor // hold data that flows in MainPipe (4)
   val bufIdxBits = log2Up(bufBlocks)
 
   val enableClockGate = cacheParams.enableClockGate
@@ -91,7 +93,7 @@ trait HasCoupledL2Parameters {
   // require(isPow2(idsAll))
 
   val grantBufSize = mshrsAll
-  val grantBufInflightSize = mshrsAll //TODO: lack or excessive? !! WARNING
+  val grantBufInflightSize = mshrsAll/bufferReductionFactor //TODO: lack or excessive? !! WARNING
 
   // width params with bank idx (used in prefetcher / ctrl unit)
   lazy val fullAddressBits = edgeOut.bundle.addressBits

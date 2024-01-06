@@ -39,7 +39,7 @@ class RefillUnit(implicit p: Parameters) extends L2Module {
   val hasData = io.sinkD.bits.opcode(0)
   val isGrant = io.sinkD.bits.opcode === Grant || io.sinkD.bits.opcode === GrantData
 
-  val grantAckQ = Module(new Queue(UInt(outerSinkBits.W), entries=mshrsAll, pipe=false, flow=false))
+  val grantAckQ = Module(new Queue(UInt(outerSinkBits.W), entries=mshrsAll/bufferReductionFactor, pipe=false, flow=false))
 
   grantAckQ.io.enq.valid := isGrant && io.sinkD.valid && first
   grantAckQ.io.enq.bits := io.sinkD.bits.sink
