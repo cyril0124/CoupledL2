@@ -240,7 +240,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     s.valid && (s.bits.fromA || s.bits.fromC)
   }).asUInt) + grantQueueCnt >= mshrsAll.U - latency
   val noSpaceForMSHRReq = PopCount(VecInit(io.pipeStatusVec.map { case s =>
-    s.valid && s.bits.fromA
+    s.valid && (s.bits.fromA || s.bits.fromC)
   }).asUInt) + grantQueueCnt >= mshrsAll.U - latency
   // TODO: only block mp_grant and acuqire
   val noSpaceForWaitSinkE = PopCount(Cat(VecInit(io.pipeStatusVec.tail.map { case s =>
@@ -249,7 +249,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
 
   toReqArb.blockSinkReqEntrance.blockA_s1 := noSpaceForSinkReq || noSpaceForWaitSinkE
   toReqArb.blockSinkReqEntrance.blockB_s1 := Cat(inflight_grant.map(g => g.valid &&
-    g.bits.set === io.fromReqArb.status_s1.b_set && g.bits.tag === io.fromReqArb.status_s1.b_tag)).orR
+    g.bits.set === io.fromReqArb.status_s1.b_set && g.bits.tag === io.fromReqArb.status_s1.b_tag)).orR // TODO: has problem here when output add reg ?
   //TODO: or should we still Stall B req?
   // A-replace related rprobe is handled in SourceB
   toReqArb.blockSinkReqEntrance.blockC_s1 := noSpaceForSinkReq
