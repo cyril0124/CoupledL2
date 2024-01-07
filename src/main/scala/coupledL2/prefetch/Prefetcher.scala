@@ -167,6 +167,7 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
   val io = IO(new PrefetchIO)
   val io_l2_pf_en = IO(Input(Bool()))
   val io_l2_pf_ctrl = IO(Input(UInt(Csr_PfCtrlBits.W)))
+  dontTouch(io)
   dontTouch(io_l2_pf_en)
   dontTouch(io_l2_pf_ctrl)
   dontTouch(io.recv_addr)

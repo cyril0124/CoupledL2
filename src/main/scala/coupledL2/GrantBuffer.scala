@@ -170,7 +170,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     pftRespQueue.io.enq.valid := io.d_task.valid && dtaskOpcode === HintAck //&&io.d_task.bits.task.isfromL2pft && io.d_task.bits.task.pfVec.get === PfSource.BOP
     pftRespQueue.io.enq.bits.tag := io.d_task.bits.task.tag
     pftRespQueue.io.enq.bits.set := io.d_task.bits.task.set
-    pftRespQueue.io.enq.bits.pfVec := PfSource.BOP
+    pftRespQueue.io.enq.bits.pfVec := io.d_task.bits.task.pfVec.get
 
     val resp = io.prefetchResp.get
     resp.valid := pftRespQueue.io.deq.valid

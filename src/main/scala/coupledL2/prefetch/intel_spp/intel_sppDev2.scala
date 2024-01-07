@@ -1409,6 +1409,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
     val recv_addr = Flipped(ValidIO(UInt(64.W)))
     val hint2llc = ValidIO(new PrefetchReq)
   })
+  dontTouch(io)
   // --------------------------------------------------------------------------------
   // csr pf ctrl
   // --------------------------------------------------------------------------------
@@ -1487,15 +1488,22 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   val ghr_l1pf_hitAccState = WireInit(0.U(PfaccState.bits.W))
   val ghr_l2pf_hitAccState = WireInit(0.U(PfaccState.bits.W)) 
   val ghr = RegInit(0.U.asTypeOf(new  globalCounter()));dontTouch(ghr)
+  val ghr_coarse = RegInit(0.U.asTypeOf(new  globalCounter()));dontTouch(ghr_coarse)
   val ghr_last1Round = RegInit(0.U.asTypeOf(new  globalCounter()));dontTouch(ghr_last1Round)
   val ghr_last2Round = RegInit(0.U.asTypeOf(new  globalCounter()));dontTouch(ghr_last2Round)
   val ghr_last3Round = RegInit(0.U.asTypeOf(new  globalCounter()));dontTouch(ghr_last3Round)
   val ghr_last4Round = RegInit(0.U.asTypeOf(new  globalCounter()));dontTouch(ghr_last4Round)
   val ghr_avgRound = RegInit(0.U.asTypeOf(new  globalCounter()));dontTouch(ghr_avgRound)
-  val ghrCounter = Counter(io.l2_pf_en, 512)
+  // fineGrain
+  val ghrCounter_fineGrain = Counter(io.l2_pf_en, 512)
   val ghr_roundReset = WireInit(false.B);dontTouch(ghr_roundReset)
-  val ghr_roundCnt = ghrCounter._1
-  ghr_roundReset := ghrCounter._2
+  val ghr_roundCnt = ghrCounter_fineGrain._1
+  ghr_roundReset := ghrCounter_fineGrain._2
+  // coarseGrain
+  val ghrCounter_coarseGrain = Counter(io.l2_pf_en, 4096)
+  val ghr_roundReset_coarseGrain = WireInit(false.B);dontTouch(ghr_roundReset)
+  val ghr_roundCnt_coarseGrain = ghrCounter_coarseGrain._1
+  ghr_roundReset_coarseGrain := ghrCounter_coarseGrain._2
 
   val deadPfEviction = RegInit(0.U(13.W))
   val issued = RegInit(0.U(16.W))
@@ -1519,6 +1527,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
     // }
     when(ghrTrain.is_l2pf){
       ghr.l2pf_hitAcc := ghr.l2pf_hitAcc + 1.U
+      ghr_coarse.l2pf_hitAcc := ghr_coarse.l2pf_hitAcc + 1.U
     }
   }
   when(io.req.fire){
@@ -1527,25 +1536,31 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
     // }
     when(io.req.bits.hasBOP){
       ghr.bop_issued := ghr.bop_issued + 1.U
+      ghr_coarse.bop_issued := ghr_coarse.bop_issued + 1.U
     }
     when(io.req.bits.hasSPP){
       ghr.spp_issued := ghr.spp_issued + 1.U
+      ghr_coarse.spp_issued := ghr_coarse.spp_issued + 1.U
     }
   }
-
+  //ghr update
+  def get_accumu2(x:UInt,y:UInt) = (x + y)
+  def get_avg2(x:UInt,y:UInt) = (x + y) >> 2.U
+  //avgRound 
+  ghr_avgRound.l2pf_hitAcc := get_avg2(ghr.l2pf_hitAcc,ghr_last1Round.l2pf_hitAcc)
+  ghr_avgRound.bop_issued  := get_avg2(ghr.bop_issued ,ghr_last1Round.bop_issued )
+  ghr_avgRound.spp_issued  := get_avg2(ghr.spp_issued ,ghr_last1Round.spp_issued )
   when(ghr_roundReset){
     ghr := 0.U.asTypeOf(new globalCounter())
     ghr_last1Round := ghr
     ghr_last2Round := ghr_last1Round
     ghr_last3Round := ghr_last2Round
     ghr_last4Round := ghr_last3Round
-    def get_accumu2(x:UInt,y:UInt) = (x + y)
-    def get_avg2(x:UInt,y:UInt) = (x + y) >> 2.U
-    ghr_avgRound.l2pf_hitAcc := get_avg2(ghr.l2pf_hitAcc,ghr_last1Round.l2pf_hitAcc)
-    ghr_avgRound.bop_issued  := get_avg2(ghr.bop_issued ,ghr_last1Round.bop_issued )
-    ghr_avgRound.spp_issued  := get_avg2(ghr.spp_issued ,ghr_last1Round.spp_issued )
     get_perfState(ghr.l2pf_hitAcc, ghr.bop_issued + ghr.spp_issued, ghr_l2pf_hitAccState) 
-  } 
+  }
+  when(ghr_roundReset_coarseGrain){
+    ghr_coarse := 0.U.asTypeOf(new globalCounter())
+  }
   
   // --------------------------------------------------------------------------------
   // spp train diverter queue
@@ -1573,13 +1588,17 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   bop.io.train.bits := io.train.bits
   //TODO: need respALL ?
   //
-  // bop.io.resp.valid := io.resp.valid //&& io.resp.bits.hasBOP
-  // bop.io.resp.bits := io.resp.bits
-  // io.resp.ready := bop.io.resp.ready
-  val respQ = Module(new ReplaceableQueueV2(new PrefetchResp,4))
-  respQ.io.flush := false.B
-  respQ.io.enq <> fTable.io.out_respReq
-  bop.io.resp <>  respQ.io.deq
+  bop.io.resp.valid := io.resp.valid && io.resp.bits.hasBOP
+  bop.io.resp.bits := io.resp.bits
+  io.resp.ready := bop.io.resp.ready
+  fTable.io.in_respReq.valid := false.B
+  fTable.io.in_respReq.bits <> 0.U.asTypeOf(new PrefetchResp)
+  fTable.io.out_respReq.ready := false.B
+  // val respQ = Module(new ReplaceableQueueV2(new PrefetchResp,4))
+  // respQ.io.flush := false.B
+  // respQ.io.enq <> fTable.io.out_respReq
+  // bop.io.resp <>  respQ.io.deq
+  // fTable.io.in_respReq <> io.resp
 
   spp.io.resp := DontCare
   spp.io.from_ghr.valid := ghr_roundReset
@@ -1762,8 +1781,57 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
       )
       weight
     }
+    def is_rubbish:Bool = WireInit(ghr_avgRound.l2pf_hitAcc === 0.U && ghr_coarse.spp_issued =/= 0.U);dontTouch(is_rubbish)
+    // def flush_pfQ = ghr.l2pf_hitAcc === 0.U && ghr_avgRound.l2pf_hitAcc === 0.U
+    def flush_pfQ = {
+      val s_IDLE :: s_WAIT :: s_RESET :: Nil = Enum(3)
+      val state = RegInit(s_IDLE)
+      val resetCounter = RegInit(0.U(2.W))
+      val resetThreshold = RegInit(0.U(2.W))
 
-    def flush_pfQ = ghr.l2pf_hitAcc === 0.U && ghr_avgRound.l2pf_hitAcc === 0.U
+      val lut_Threshold = WireInit(0.U(2.W))
+      def empty_hit(x:UInt) = x === 0.U
+      lut_Threshold  := MuxLookup(
+        Cat(empty_hit(ghr_last3Round.l2pf_hitAcc),empty_hit(ghr_last4Round.l2pf_hitAcc)),
+        1.U,
+        Seq(
+          "b100".U  -> 1.U,
+          "b110".U  -> 2.U,
+          "b111".U  -> 3.U,
+        )
+      )
+
+      when(is_rubbish){
+        resetThreshold := lut_Threshold
+      }
+
+      when(state === s_WAIT && ghr_roundReset){
+        resetCounter := resetCounter + 1.U
+      }.elsewhen(state === s_IDLE){
+        resetCounter := 0.U
+      }
+
+      switch(state){
+        is(s_IDLE){
+          when(is_rubbish){
+            state := s_WAIT
+          }
+        }
+        is(s_WAIT){
+          when(resetCounter === resetThreshold){
+            state := s_RESET
+          }
+        }
+        is(s_RESET){
+          when(ghr_roundReset){
+            state := s_IDLE
+          }
+        }
+      }
+      
+      val flush =WireInit(state === s_WAIT)
+      flush
+    }
   }
   q_sms.io.flush := false.B
   q_bop.io.flush := ghr_scheduler.flush_pfQ
@@ -1791,8 +1859,6 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
 
   fTable.io.in_trainReq.valid := io.train.valid
   fTable.io.in_trainReq.bits := io.train.bits
-
-  fTable.io.in_respReq <> io.resp
 
   fTable.io.is_hint2llc := q_hint2llc.io.deq.fire
   fTable.io.ctrl := ctrl_fitlerTableConfig

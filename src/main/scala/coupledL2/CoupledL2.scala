@@ -380,14 +380,18 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
             s.req.valid := p.io.req.valid && bank_eq(p.io.req.bits.set, i, bankBits)
             s.req.bits := p.io.req.bits
             prefetchReqsReady(i) := s.req.ready && bank_eq(p.io.req.bits.set, i, bankBits)
+
             val s1_train = RegEnable(s.train.bits, 0.U.asTypeOf(new PrefetchTrain()(pftParams)), s.train.valid)
             val s1_resp  = RegEnable(s.resp.bits, 0.U.asTypeOf(new PrefetchResp()(pftParams)), s.resp.valid)
+            //pf train
             prefetchTrains.get(i).valid := RegNext(s.train.valid, false.B)
             prefetchTrains.get(i).bits := s1_train
             s.train.ready := prefetchTrains.get(i).ready
+            //pf resp
             prefetchResps.get(i).valid := RegNext(s.resp.valid, false.B)
             prefetchResps.get(i).bits := s1_resp
-            s.resp.ready := prefetchTrains.get(i).ready
+            s.resp.ready := prefetchResps.get(i).ready
+            
             prefetchEvicts.foreach({
                   case Some(evict_wire) => 
                     val s_evict = Pipeline(s.evict.get)

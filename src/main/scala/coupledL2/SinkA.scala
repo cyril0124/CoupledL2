@@ -59,7 +59,7 @@ class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
     task.aliasTask.foreach(_ := false.B)
     task.useProbeData := false.B
     task.pfVec.foreach(_ := PfSource.NONE)
-    task.needHint.foreach(_ := a.data(0))
+    task.needHint.foreach(_ := true.B) //a.data(0))
     task.dirty := false.B
     task.way := 0.U(wayBits.W)
     task.meta := 0.U.asTypeOf(new MetaEntry)
