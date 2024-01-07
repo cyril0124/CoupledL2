@@ -497,6 +497,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   val ram = LazyModule(new coupledL2.TLRAM(AddressSet(0, 0xffffffffffffL), beatBytes = 32)) // DPI-C memory
   var master_nodes: Seq[TLClientNode] = Seq() // TODO
   val NumCores=2
+  
+  val l1_sms_send_0_node = (0 until nrL2).map(i => LazyModule(new PrefetchSmsOuterNode))
   // val nullNode = LazyModule(new SppSenderNull)
   val l2List = (0 until nrL2).map{i =>
     val l1d = createClientNode(s"l1d$i", 32)
@@ -535,6 +537,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         PrefetchReceiverParams() => spp has cross level refill
         None                     => spp only refill L2 
         */
+        enableAssert = false
       )
       case DebugOptionsKey => DebugOptions()
     })))
@@ -542,8 +545,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     l1xbar := TLBuffer() := l1d
     l2.pf_recv_node match{
       case Some(l2Recv) => 
-        val l1_sms_send_0_node = LazyModule(new PrefetchSmsOuterNode)
-        l2Recv := l1_sms_send_0_node.outNode
+        l2Recv := l1_sms_send_0_node(i).outNode
       case None =>
     }
     l2xbar := TLBuffer() := l2.node := l1xbar
@@ -657,11 +659,19 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     val io = IO(new Bundle{
       val perfClean = Input(Bool())
       val perfDump = Input(Bool())
+      val pf_en = Input(Bool())
+      val pf_ctrl = Input(UInt(16.W))
+      val pf_addr = Flipped(Valid(UInt(64.W)))
     })
-
+    dontTouch(io)
     l2List.foreach(_.module.io.dfx_reset.scan_mode := false.B)
     l2List.foreach(_.module.io.dfx_reset.lgc_rst_n := true.B.asAsyncReset)
     l2List.foreach(_.module.io.dfx_reset.mode := false.B)
+    l1_sms_send_0_node.foreach(x => {
+      x.module.io.pf_en := io.pf_en
+      x.module.io.pf_ctrl := io.pf_ctrl
+      x.module.io.addr <> io.pf_addr
+    })
     
     val logTimestamp = WireInit(0.U(64.W))
     val perfClean = WireInit(false.B)
