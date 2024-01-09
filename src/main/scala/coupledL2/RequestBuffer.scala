@@ -66,6 +66,9 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     }))
 
     val hasLatePF = Output(Bool())
+
+    /* fpga debug signals */
+    val requestBufferLeak = Output(Bool())
   })
 
   /* ======== mp s2 and s3 block A req ======== */
@@ -289,4 +292,22 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
         // assert !(all entries occupied for 100 cycles)
     }
   }
+
+  val bufferLeak = RegInit(false.B)
+  val bufferTimer_debug = RegInit(VecInit(Seq.fill(entries)(0.U(16.W))))
+  buffer zip bufferTimer_debug map {
+    case (e, t) =>
+      when(e.valid) {
+        t := t + 1.U
+      }
+      when(RegNext(RegNext(e.valid) && !e.valid)) {
+        t := 0.U
+      }
+      if (cacheParams.enableAssert) assert(t < 20000.U, "ReqBuf Leak")
+      when(t > 2020000.U){
+        bufferLeak := true.B
+
+      }
+  }
+  io.requestBufferLeak := bufferLeak
 }

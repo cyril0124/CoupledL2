@@ -114,7 +114,11 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
     val replResp = ValidIO(new ReplacerResult)
     // used to count occWays for Grant to retry
     val msInfo = Vec(mshrsAll, Flipped(ValidIO(new MSHRInfo)))
+    /* fpga debug signals */
+    val directoryReadReady = Output(Bool())
   })
+
+  io.directoryReadReady := RegNext(io.read.ready)
 
   //  TODO: debug address consider multi-bank
   def restoreAddr(set: UInt, tag: UInt) = {

@@ -128,6 +128,9 @@ class SourceC(implicit p: Parameters) extends L2Module with HasPerfLogging{
       val blockSinkBReqEntrance = Bool()
       val blockMSHRReqEntrance = Bool()
     })
+    /* fpga debug signals */
+    val sourceCReady = Output(Bool())
+    val sourceCFull = Output(Bool())
   })
 
   // We must keep SourceC FIFO, so a queue is used
@@ -219,4 +222,7 @@ class SourceC(implicit p: Parameters) extends L2Module with HasPerfLogging{
   io.resp.set := parseFullAddress(io.out.bits.address)._2
   io.resp.tag := parseFullAddress(io.out.bits.address)._1
   io.resp.respInfo := 0.U.asTypeOf(new RespInfoBundle)
+
+  io.sourceCReady := RegNext(io.out.ready)
+  io.sourceCFull := RegEnable(true.B, false.B, !io.in.ready)
 }

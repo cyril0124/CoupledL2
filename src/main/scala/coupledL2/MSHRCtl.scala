@@ -90,7 +90,12 @@ class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
     val msStatus = topDownOpt.map(_ => Vec(mshrsAll, ValidIO(new MSHRStatus)))
 
     /* debug signals */
-    val fpga_dbg = Vec(mshrsAll, ValidIO(new L2MSHRDbgSignal))
+    val fpga_dbg = new Bundle() {
+      val mshrs = Vec(mshrsAll, ValidIO(new L2MSHRDbgSignal))
+      val acqureUnitReady = Output(Bool())
+      val sourceBReady = Output(Bool())
+      val sourceBConflictMaskOver1 = Output(Bool())
+    }
   })
 
   val mshrs = Seq.fill(mshrsAll) { Module(new MSHR()) }
@@ -136,7 +141,7 @@ class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
       m.io.bMergeTask.bits := io.bMergeTask.bits
 
       // debug signals
-      io.fpga_dbg(i) := m.io.fpga_dbg
+      io.fpga_dbg.mshrs(i) := m.io.fpga_dbg
   }
 
   val latency = 1 // stall latency cycle for timing
@@ -226,4 +231,8 @@ class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
     //     XSPerfAccumulate("prefetch_trains", io.prefetchTrain.get.fire)
     // }
   }
+
+  io.fpga_dbg.acqureUnitReady := acquireUnit.io.acqureUnitReady
+  io.fpga_dbg.sourceBReady := sourceB.io.sourceBReady
+  io.fpga_dbg.sourceBConflictMaskOver1 := sourceB.io.sourceBConflictMaskOver1
 }

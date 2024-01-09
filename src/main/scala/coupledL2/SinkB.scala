@@ -40,6 +40,9 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
       val willAllocMshr = Bool()
     }))
     val bMergeTask = ValidIO(new BMergeTask)
+    /* fpga debug signals */
+    val sinkBReady = Output(Bool())
+    val sinkBRetryTimeOut = Output(Bool())
   })
 
   def fromTLBtoTaskBundle(b: TLBundleB): TaskBundle = {
@@ -188,4 +191,18 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
     XSPerfAccumulate("mp_s3_block_sinkB", (io.b.valid || taskRetryPipe.valid) && !task_addrConflict && !task_replaceConflict && !task_mergeB && task_s3AddrConflict)
     //!!WARNING: TODO: if this is zero, that means fucntion [Probe merge into MSHR-Release] is never tested, and may have flaws
   }
+
+  io.sinkBReady := RegNext(io.b.ready)
+  val task_retry_count_debug = RegInit(0.U(12.W))
+  dontTouch(task_retry_count_debug)
+  when(task_retry.valid) {
+    task_retry_count_debug := task_retry_count_debug + 1.U
+  }.elsewhen(io.task.fire) {
+    task_retry_count_debug := 0.U
+  }
+  val sinkBRetryTimeOut = RegInit(false.B)
+  when(task_retry_count_debug === 500.U) {
+    sinkBRetryTimeOut := true.B
+  }
+  io.sinkBRetryTimeOut := sinkBRetryTimeOut
 }

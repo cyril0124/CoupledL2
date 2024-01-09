@@ -301,7 +301,3 @@ class L2MSHRDbgSignal(tagBits: Int=64, setBits:Int=64) extends Bundle {
   val mshr_state = UInt(18.W)
 }
 
-class L2GrantBufDbgSignal extends Bundle{
-  val d_task_valid = Bool()
-  val full = Bool()
-}

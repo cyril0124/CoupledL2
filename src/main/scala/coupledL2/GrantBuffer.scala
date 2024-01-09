@@ -80,8 +80,10 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     // to block sourceB from sending same-addr probe until GrantAck received
     val grantStatus = Output(Vec(grantBufInflightSize, new GrantStatus))
 
-    /* debug signals */
-    val fpga_dbg = Output(new L2GrantBufDbgSignal)
+    /* fpga debug signals */
+    val grantQueueFull = Output(Bool())
+    val grantQueueFullAndTaskValid = Output(Bool())
+    val inflightGrantQueueFull = Output(Bool())
   })
 
   // =========== functions ===========
@@ -131,9 +133,6 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   val grantQueueCnt = grantQueue.io.count
   val full = !grantQueue.io.enq.ready
   if(cacheParams.enableAssert) assert(!(full && io.d_task.valid), "GrantBuf full and RECEIVE new task, back pressure failed")
-
-  io.fpga_dbg.d_task_valid := io.d_task.valid
-  io.fpga_dbg.full := full
 
   // =========== dequeue entry and fire ===========
   require(beatSize == 2)
@@ -303,4 +302,9 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
         XSPerfMax("max_grant_grantack_period", t, enable)
     }
   }
+
+  // fpga debug
+  io.grantQueueFull := RegEnable(true.B, false.B, full)
+  io.grantQueueFullAndTaskValid := RegEnable(true.B, false.B, full && grantQueue.io.enq.valid)
+  io.inflightGrantQueueFull := RegEnable(true.B, false.B, inflight_full)
 }

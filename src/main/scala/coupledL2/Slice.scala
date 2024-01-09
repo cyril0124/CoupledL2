@@ -30,6 +30,11 @@ import xs.utils.RegNextN
 import xs.utils.mbist.MBISTPipeline
 import xs.utils.perf.HasPerfLogging
 
+class sliceDbgIO (implicit p: Parameters) extends L2Bundle {
+  val mshrsState = Vec(mshrsAll, ValidIO(new L2MSHRDbgSignal))
+  val unit_debug_sginals = UInt()
+}
+
 class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Module with HasPerfLogging with HasPerfEvents{
   val io = IO(new Bundle {
     val in = Flipped(TLBundle(edgeIn.bundle))
@@ -41,8 +46,7 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
     val latePF = topDownOpt.map(_ => Output(Bool()))
     val eccError = Output(Bool())
     /* debug signals */
-    val mshrsState = Vec(mshrsAll, ValidIO(new L2MSHRDbgSignal))
-    val grantBufSiganl = Output(new L2GrantBufDbgSignal)
+    val fpga_dbg = Output(new sliceDbgIO)
   })
 
   val reqArb = Module(new RequestArb())
@@ -64,12 +68,6 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
     s"${parentName}_mbistPipe",
     cacheParams.hasMbist && cacheParams.hasShareBus
   )
-
-  io.mshrsState := mshrCtl.io.fpga_dbg
-  io.grantBufSiganl := grantBuf.io.fpga_dbg
-
-  val prbq = Module(new ProbeQueue())
-  prbq.io <> DontCare // @XiaBin TODO
 
   a_reqBuf.io.in <> sinkA.io.task
   a_reqBuf.io.mshrInfo := mshrCtl.io.msInfo
@@ -229,4 +227,21 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   // TODO: perfEvents
   val perfEvents = (Seq(mainPipe, reqArb)).flatMap(_.getPerfEvents)
   generatePerfEvent()
+
+  io.fpga_dbg.mshrsState := mshrCtl.io.fpga_dbg.mshrs
+  io.fpga_dbg.unit_debug_sginals := Cat(
+    mshrCtl.io.fpga_dbg.acqureUnitReady,
+    mshrCtl.io.fpga_dbg.sourceBReady,
+    directory.io.directoryReadReady,
+    grantBuf.io.grantQueueFull,
+    grantBuf.io.grantQueueFullAndTaskValid,
+    grantBuf.io.inflightGrantQueueFull,
+    a_reqBuf.io.requestBufferLeak,
+    sinkA.io.sinkAReady,
+    sinkB.io.sinkBReady,
+    sinkB.io.sinkBRetryTimeOut,
+    sourceC.io.sourceCReady,
+    sourceC.io.sourceCFull
+  )
+
 }

@@ -28,6 +28,8 @@ class AcquireUnit(implicit p: Parameters) extends L2Module {
   val io = IO(new Bundle() {
     val sourceA = DecoupledIO(new TLBundleA(edgeOut.bundle))
     val task = Flipped(DecoupledIO(new SourceAReq))
+    /* fpga debug signals */
+    val acqureUnitReady = Output(Bool())
   })
 
   val a = io.sourceA
@@ -47,6 +49,8 @@ class AcquireUnit(implicit p: Parameters) extends L2Module {
 
   a.valid := io.task.valid
   io.task.ready := a.ready
+
+  io.acqureUnitReady := RegNext(io.task.ready)
 
   dontTouch(io)
 }

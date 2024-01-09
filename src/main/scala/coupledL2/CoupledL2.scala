@@ -163,12 +163,6 @@ trait HasCoupledL2Parameters {
   }
 }
 
-class L2DbgIO extends Bundle {
-  val mshrsState = Vec(16, ValidIO(new L2MSHRDbgSignal))
-  val grantBufSiganl = Output(new L2GrantBufDbgSignal)
-}
-
-
 class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyModule with HasCoupledL2Parameters {
 
   val xfer = TransferSizes(blockBytes, blockBytes)
@@ -260,7 +254,7 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
     val io = IO(new Bundle {
       val dfx_reset = Input(new DFTResetSignals())
       /* debug signals */
-      val fpga_dbg = Vec(banks, new L2DbgIO)
+      val fpga_dbg = Vec(banks, new sliceDbgIO)
     })
 
     // Display info
@@ -374,8 +368,7 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
         }))
 
         // debug signals
-        io.fpga_dbg(i).mshrsState := RegNext(slice.io.mshrsState)
-        io.fpga_dbg(i).grantBufSiganl := RegNext(slice.io.grantBufSiganl)
+        io.fpga_dbg(i) := RegNext(slice.io.fpga_dbg)
 
         slice.io.in <> in
         in.b.bits.address := restoreAddress(slice.io.in.b.bits.address, i)

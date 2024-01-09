@@ -46,6 +46,9 @@ class SourceB(implicit p: Parameters) extends L2Module with HasPerfLogging{
     val sourceB = DecoupledIO(new TLBundleB(edgeIn.bundle))
     val task = Flipped(DecoupledIO(new SourceBReq))
     val grantStatus = Input(Vec(grantBufInflightSize, new GrantStatus))
+    /* fpga debug signals */
+    val sourceBReady = Output(Bool())
+    val sourceBConflictMaskOver1 = Output(Bool())
   })
 
   def toTLBundleB(task: SourceBReq) = {
@@ -125,4 +128,7 @@ class SourceB(implicit p: Parameters) extends L2Module with HasPerfLogging{
       XSPerfAccumulate(s"probe_buffer_util_$i", update)
     }
   }
+
+  io.sourceBReady := RegNext(io.sourceB.ready)
+  io.sourceBConflictMaskOver1 := RegEnable(true.B, false.B, PopCount(conflictMask) > 1.U)
 }

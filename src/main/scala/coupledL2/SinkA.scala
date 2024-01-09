@@ -33,7 +33,11 @@ class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
     val a = Flipped(DecoupledIO(new TLBundleA(edgeIn.bundle)))
     val prefetchReq = prefetchOpt.map(_ => Flipped(DecoupledIO(new PrefetchReq)))
     val task = DecoupledIO(new TaskBundle)
+    /* fpga debug signals */
+    val sinkAReady = Output(Bool())
   })
+  io.sinkAReady := RegNext(io.a.ready)
+
   if(cacheParams.enableAssert) assert(!(io.a.valid && io.a.bits.opcode(2, 1) === 0.U), "no Put")
 
   val commonReq = Wire(io.task.cloneType)
