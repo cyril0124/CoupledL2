@@ -292,16 +292,11 @@ class L2ToL1Hint(implicit p: Parameters) extends Bundle {
   val sourceId = UInt(32.W)    // tilelink sourceID
 }
 
-class L2MSHRDbgSignal extends Bundle {
+class L2MSHRDbgSignal(tagBits: Int=64, setBits:Int=64) extends Bundle {
   // req mes
-  val tag = UInt(64.W)
-  val set = UInt(64.W)
-  val opcode = UInt(3.W)
-  val param = UInt(3.W)
+  val req_mes = UInt((tagBits+setBits+3+3).W) // tag + set + opcode + param
   // dir mes
-  val hit = Bool()
-  val state = UInt(3.W)
-  val clients = UInt(1.W) // valid-bit of clients
+  val dir_mes = UInt((tagBits+setBits+1+3+1).W) // tag + set + hit + state + clients
   // state mes
   val mshr_state = UInt(18.W)
 }

@@ -89,14 +89,20 @@ class MSHR(implicit p: Parameters) extends L2Module {
 
   // fpga debug signal
   io.fpga_dbg.valid := req_valid_dups(0)
-  io.fpga_dbg.bits.tag := req.tag
-  io.fpga_dbg.bits.set := req.set
-  io.fpga_dbg.bits.opcode := req.opcode
-  io.fpga_dbg.bits.param := req.param
+  io.fpga_dbg.bits.req_mes := Cat(
+    req.tag,
+    req.set,
+    req.opcode,
+    req.param
+  )
   // dir mes
-  io.fpga_dbg.bits.hit := dirResult.hit
-  io.fpga_dbg.bits.state := dirResult.meta.state
-  io.fpga_dbg.bits.clients := dirResult.meta.clients // valid-bit of clients
+  io.fpga_dbg.bits.dir_mes := Cat(
+    dirResult.tag,
+    dirResult.set,
+    dirResult.hit,
+    dirResult.meta.state,
+    dirResult.meta.clients
+  )
   // state mes
   // schedule
   io.fpga_dbg.bits.mshr_state := Cat(state_dups(0).s_acquire, state_dups(0).s_rprobe, state_dups(0).s_pprobe, state_dups(0).s_release, state_dups(0).s_probeack, state_dups(0).s_refill, state_dups(0).s_merge_probeack,

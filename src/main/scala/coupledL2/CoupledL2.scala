@@ -494,12 +494,6 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
       }
     }
 
-    // debug signals
-//    io.fpga_dbg.zip(slices).foreach {
-//      case (dbg, s) => dbg := s.io.fpga_dbg
-//    }
-//    io.fpga_dbg := DontCare
-
     if(cacheParams.enablePerf) {
       val grant_fire = slices.map{ slice => {
                           val (_, _, grant_fire_last, _) = node.in.head._2.count(slice.io.in.d)
