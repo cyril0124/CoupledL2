@@ -620,7 +620,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
       0.S(shareBOBits.W),
       Seq(
         M_SIMPLE_TIMELY -> s1_ghr_shareBO,
-        M_SIMPLE_UNTIMELY -> (s1_ghr_shareBO.asUInt << 2.U).asSInt,
+        M_SIMPLE_UNTIMELY -> s1_ghr_shareBO,
         M_COMPLEX_TIMELY -> s1_ghr_shareBO,
         M_COMPLEX_UNTIMELY -> s1_ghr_shareBO
       )
@@ -1019,7 +1019,7 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
   val ctrl_filter_sms = WireInit(io.ctrl(PfVectorConst.SMS));dontTouch(ctrl_filter_sms)
   val ctrl_filter_bop = WireInit(io.ctrl(PfVectorConst.BOP));dontTouch(ctrl_filter_bop)
   val ctrl_filter_spp = WireInit(io.ctrl(PfVectorConst.SPP));dontTouch(ctrl_filter_spp)
-
+  ctrl_filter_sms := false.B
   def hash1(addr:    UInt) = addr(log2Up(fTableEntries) - 1, 0)
   def hash2(addr:    UInt) = addr(2 * log2Up(fTableEntries) - 1, log2Up(fTableEntries))
   def ft_get_idx(pageAddr: UInt): UInt = hash1(pageAddr) ^ hash2(pageAddr)
@@ -1481,9 +1481,11 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
     }
   }
   class globalCounter extends HyperPrefetchDev2Bundle{
+    val l1pf_hitAcc = UInt(6.W)
     val l2pf_hitAcc = UInt(6.W)
     val bop_issued = UInt(7.W)
     val spp_issued = UInt(7.W)
+    val l1pf_issued = UInt(7.W)
   }
   val ghr_l1pf_hitAccState = WireInit(0.U(PfaccState.bits.W))
   val ghr_l2pf_hitAccState = WireInit(0.U(PfaccState.bits.W)) 
@@ -1522,18 +1524,18 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   // global acc state
   val ghrTrain = io.train.bits
   when((io.train.valid && io.train.bits.state === AccessState.PREFETCH_HIT)){
-    // when(ghrTrain.is_l1pf){
-    //   ghr.l1pf_hitAcc := ghr.l1pf_hitAcc + 1.U
-    // }
+    when(ghrTrain.is_l1pf){
+      ghr.l1pf_hitAcc := ghr.l1pf_hitAcc + 1.U
+    }
     when(ghrTrain.is_l2pf){
       ghr.l2pf_hitAcc := ghr.l2pf_hitAcc + 1.U
       ghr_coarse.l2pf_hitAcc := ghr_coarse.l2pf_hitAcc + 1.U
     }
   }
   when(io.req.fire){
-    // when(io.req.bits.is_l1pf){
-    //   ghr.l1pf_issued := ghr.l1pf_issued + 1.U
-    // }
+    when(io.req.bits.is_l1pf){
+      ghr.l1pf_issued := ghr.l1pf_issued + 1.U
+    }
     when(io.req.bits.hasBOP){
       ghr.bop_issued := ghr.bop_issued + 1.U
       ghr_coarse.bop_issued := ghr_coarse.bop_issued + 1.U
@@ -1783,8 +1785,9 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
     }
 
     def is_rubbish:Bool = WireInit(ghr_avgRound.l2pf_hitAcc === 0.U && ghr_coarse.spp_issued =/= 0.U);dontTouch(is_rubbish)
-    // def flush_pfQ = ghr.l2pf_hitAcc === 0.U && ghr_avgRound.l2pf_hitAcc === 0.U
-    def flush_pfQ = {
+    def sms_flush_pfQ = ghr.l1pf_hitAcc === 0.U && ghr_coarse.l1pf_hitAcc << 4.U < ghr_coarse.l1pf_issued
+    def bop_flush_pfQ = false.B//ghr.l2pf_hitAcc === 0.U && ghr_coarse.l2pf_hitAcc << 4.U < (ghr_coarse.bop_issued + ghr_coarse.spp_issued)
+    def spp_flush_pfQ = {
       val s_IDLE :: s_WAIT :: s_RESET :: Nil = Enum(3)
       val state = RegInit(s_IDLE)
       val resetCounter = RegInit(0.U(2.W))
@@ -1834,10 +1837,11 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
       flush
     }
   }
+
   q_sms.io.flush := false.B
-  q_bop.io.flush := false.B//ghr_scheduler.flush_pfQ
-  q_spp.io.flush := ghr_scheduler.flush_pfQ
-  q_hint2llc.io.flush := ghr_scheduler.flush_pfQ
+  q_bop.io.flush := ghr_scheduler.bop_flush_pfQ
+  q_spp.io.flush := ghr_scheduler.spp_flush_pfQ
+  q_hint2llc.io.flush := false.B
 
   out_wRR.io.in(0) <> q_bop.io.deq
   out_wRR.io.in(1) <> q_spp.io.deq
@@ -1885,8 +1889,9 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   )
   q_sms.io.deq.ready := s1_req.ready
   s0_req.ready := s1_req.ready //&& !q_sms.io.deq.valid
-  val pftQueue = Module(new Queue(new PrefetchReq, 2, flow = true ,pipe = false))
+  val pftQueue = Module(new ReplaceableQueueV2(new PrefetchReq, 16))
   pftQueue.io.enq <> s1_req
+  pftQueue.io.flush := false.B
   io.req <> pftQueue.io.deq
 
   XSPerfAccumulate("pfQ_sms_replaced_enq", q_sms.io.full && q_sms.io.enq.valid && !q_sms.io.enq.ready)
