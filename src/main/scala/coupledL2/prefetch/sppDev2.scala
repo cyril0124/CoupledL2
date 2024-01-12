@@ -1439,7 +1439,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   val ctrl_SMSen = WireInit(ctrlSwitch(PfCtrlConst.Switch.SMS));dontTouch(ctrl_SMSen)
   val ctrl_BOPen = WireInit(ctrlSwitch(PfCtrlConst.Switch.BOP));dontTouch(ctrl_BOPen)
   val ctrl_SPPen = WireInit(ctrlSwitch(PfCtrlConst.Switch.SPP));dontTouch(ctrl_SPPen)
-
+  ctrl_SPPen := false.B
   val ctrl_sppConfig = WireInit(PfCtrlConst.SppConfig.get_fields(io.l2_pf_ctrl));dontTouch(ctrl_sppConfig)
   val ctrl_fitlerTableConfig = WireInit(PfCtrlConst.FitlerTableConfig.get_fields(io.l2_pf_ctrl));dontTouch(ctrl_fitlerTableConfig)
   
@@ -1634,7 +1634,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   // SPP Scheduler Table       |    BOP Scheduler Table   
   // |bop\sms| N | L | H |     |    |bop\sms| N | L | H |
   // --------------------      |    --------------------
-  // | N     | 1 | 3 | 5 |     |    | N     | 1 | 2 | 1 |
+  // | N     | 2 | 3 | 5 |     |    | N     | 1 | 2 | 1 |
   // | L     | 2 | 3 | 5 |     |    | L     | 1 | 2 | 1 |
   // | H     | 2 | 3 | 5 |     |    | H     | 3 | 4 | 1 |
 
@@ -1883,11 +1883,9 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   s1_req.valid := s0_req.fire
   s1_req.bits := ParallelPriorityMux(
     Seq(
-        q_sms.io.deq.valid -> q_sms.io.deq.bits,
         s0_req.valid -> s0_req.bits
     )
   )
-  q_sms.io.deq.ready := s1_req.ready
   s0_req.ready := s1_req.ready //&& !q_sms.io.deq.valid
   val pftQueue = Module(new ReplaceableQueueV2(new PrefetchReq, 16))
   pftQueue.io.enq <> s1_req
