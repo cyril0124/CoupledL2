@@ -1439,7 +1439,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   val ctrl_SMSen = WireInit(ctrlSwitch(PfCtrlConst.Switch.SMS));dontTouch(ctrl_SMSen)
   val ctrl_BOPen = WireInit(ctrlSwitch(PfCtrlConst.Switch.BOP));dontTouch(ctrl_BOPen)
   val ctrl_SPPen = WireInit(ctrlSwitch(PfCtrlConst.Switch.SPP));dontTouch(ctrl_SPPen)
-  ctrl_SPPen := false.B
+  // ctrl_SPPen := false.B
   val ctrl_sppConfig = WireInit(PfCtrlConst.SppConfig.get_fields(io.l2_pf_ctrl));dontTouch(ctrl_sppConfig)
   val ctrl_fitlerTableConfig = WireInit(PfCtrlConst.FitlerTableConfig.get_fields(io.l2_pf_ctrl));dontTouch(ctrl_fitlerTableConfig)
   
@@ -1568,6 +1568,11 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   // spp train diverter queue
   // --------------------------------------------------------------------------------
   //devert
+  val s0_trainReq = WireInit(0.U.asTypeOf(DecoupledIO(new PrefetchTrain)));dontTouch(s0_trainReq)
+  s0_trainReq.valid := io.train.valid && io.train.bits.state =/= AccessState.LATE_HIT
+  s0_trainReq.bits := io.train.bits
+  io.train.ready := s0_trainReq.ready
+
   def sms2sppTrain(in:PrefetchReq):PrefetchTrain={
     val out = WireInit(0.U.asTypeOf(new PrefetchTrain))
     out.tag := in.tag
@@ -1576,18 +1581,18 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
     out.source := 0.U
     out
   }    
-  train_spp_q.io.enq.valid := io.train.valid || sms.io.req.valid
-  train_spp_q.io.enq.bits := Mux(io.train.valid,io.train.bits,sms2sppTrain(sms.io.req.bits))
-  // train_spp_q.io.enq.valid := io.train.valid
-  // train_spp_q.io.enq.bits := io.train.bits
+  train_spp_q.io.enq.valid := s0_trainReq.valid || sms.io.req.valid
+  train_spp_q.io.enq.bits := Mux(s0_trainReq.valid, s0_trainReq.bits,sms2sppTrain(sms.io.req.bits))
+  // train_spp_q.io.enq.valid := s0_trainReq.valid
+  // train_spp_q.io.enq.bits :=  s0_trainReq.bits
   train_spp_q.io.flush := false.B
 
   spp.io.train.valid := ctrl_SPPen && train_spp_q.io.deq.valid
   spp.io.train.bits := train_spp_q.io.deq.bits
   train_spp_q.io.deq.ready := spp.io.train.ready
   //
-  bop.io.train.valid := ctrl_BOPen && io.train.valid
-  bop.io.train.bits := io.train.bits
+  bop.io.train.valid := ctrl_BOPen && s0_trainReq.valid
+  bop.io.train.bits :=  s0_trainReq.bits
   //TODO: need respALL ?
   //
   bop.io.resp.valid := io.resp.valid && io.resp.bits.hasBOP
@@ -1862,8 +1867,8 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   q_sms.io.deq.ready := fTable.io.in_pfReq.ready
   out_wRR.io.out.ready := fTable.io.in_pfReq.ready && !q_sms.io.deq.valid
 
-  fTable.io.in_trainReq.valid := io.train.valid
-  fTable.io.in_trainReq.bits := io.train.bits
+  fTable.io.in_trainReq.valid := s0_trainReq.valid
+  fTable.io.in_trainReq.bits :=  s0_trainReq.bits
 
   fTable.io.is_hint2llc := q_hint2llc.io.deq.fire
   fTable.io.ctrl := ctrl_fitlerTableConfig
@@ -1874,7 +1879,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   fTable.io.evict.valid := false.B//io.evict.valid
   fTable.io.evict.bits := io.evict.bits
   io.evict.ready := fTable.io.evict.ready
-  io.train.ready := true.B
+  s0_trainReq.ready := true.B
   // --------------------------------------------------------------------------------
   // stage 1 send out 
   // --------------------------------------------------------------------------------
