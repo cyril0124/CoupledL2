@@ -1349,8 +1349,8 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     //replay
     val s1_replayQ_enq_valid = RegNext(s0_replay_enq_valid,false.B)
     val s1_replayQ_enq = RegNext(s0_replay_enq,0.U.asTypeOf(new PrefetchReq))
-    replay_Q0.io.enq.valid := s1_replayQ_enq
-    replay_Q0.io.enq := s1_replayQ_enq
+    replay_Q0.io.enq.valid := s1_replayQ_enq_valid
+    replay_Q0.io.enq.bits := s1_replayQ_enq
     replay_Q0.io.flush := false.B
     
     val s1_pfOut_valid = WireInit(false.B)
