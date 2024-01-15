@@ -411,11 +411,13 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
       (!s2_fwd_tag_hit && !s1_fwd_tag_hit && !st_tag_hit) -> 0.U
     )
   )
-  st_issueQ.io.enq.valid := io.req.valid && !io.s0_toPtReq.ready && !s0_skip
-  st_issueQ.io.enq.bits.blkAddr := io.req.bits.blkAddr
-  st_issueQ.io.enq.bits.oldSig := s0_oldSig
-  st_issueQ.io.enq.bits.delta := s0_delta
-  st_issueQ.io.flush := false.B
+
+  val s0_issueQ_enq_valid = WireInit(io.req.valid && !io.s0_toPtReq.ready && !s0_skip)
+  val s0_issueQ_enq = WireInit(0.U.asTypeOf(new issueQEentry()))
+  s0_issueQ_enq.blkAddr := io.req.bits.blkAddr
+  s0_issueQ_enq.oldSig := s0_oldSig
+  s0_issueQ_enq.delta := s0_delta
+
   val s0_can_go_s1 = WireInit(s0_valid && !s0_skip)
   // --------------------------------------------------------------------------------
   // stage 1
@@ -439,6 +441,13 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   s1_fwd_s0_tag := s1_req.get_Tag
   s1_fwd_s0_blkOff := s1_req.get_blkOff
   s1_fwd_s0_sig := s1_newSig
+
+  //issueQenq
+  val s1_issueQ_enq_valid = RegNext(s0_issueQ_enq_valid, false.B)
+  val s1_issueQ_enq = RegNext(s0_issueQ_enq,0.U.asTypeOf(s0_issueQ_enq.cloneType))
+  st_issueQ.io.enq.valid := s1_issueQ_enq_valid
+  st_issueQ.io.enq.bits := s1_issueQ_enq
+  st_issueQ.io.flush := false.B
 
   // pressure cacalute
   val s1_cal_newSig = WireInit(makeSign(s1_oldSig,s1_delta));dontTouch(s1_cal_newSig)
@@ -1233,10 +1242,10 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     val s0_replay_enq = WireInit(io.in_pfReq.bits)
 
     //only l2 pf req need go quiteUpdateQ
-    quiteUpdateQ.io.enq.valid := s0_can_send && io.out_pfReq.fire
-    quiteUpdateQ.io.enq.bits := io.out_pfReq.bits
-    quiteUpdateQ.io.enq.bits.pfVec := s0_flow_pfVec(io.out_pfReq.bits.get_blockOff) | io.out_pfReq.bits.pfVec
-    quiteUpdateQ.io.flush := false.B
+    val s0_quiteUpdate_enq_valid = WireInit(s0_can_send && io.out_pfReq.fire)
+    val s0_quiteUpdate_enq = WireInit(io.out_pfReq.bits)
+    val s0_quiteUpdate_enq_pfVec = WireInit(s0_flow_pfVec(io.out_pfReq.bits.get_blockOff) | io.out_pfReq.bits.pfVec)
+
     s0_valid := quiteUpdateQ.io.deq.fire || replay_Q0.io.deq.fire || io.in_respReq.fire //|| q_hint2llc.io.deq.valid
     s0_req := ParallelPriorityMux(
       Seq(
@@ -1352,7 +1361,16 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     replay_Q0.io.enq.valid := s1_replayQ_enq_valid
     replay_Q0.io.enq.bits := s1_replayQ_enq
     replay_Q0.io.flush := false.B
-    
+
+    //quiteUpdate
+    val s1_quiteUpdate_enq_valid = RegNext(s0_quiteUpdate_enq_valid, false.B)
+    val s1_quiteUpdate_enq = RegNext(s0_quiteUpdate_enq,0.U.asTypeOf(new PrefetchReq))
+    val s1_quiteUpdate_enq_pfVec = RegNext(s0_quiteUpdate_enq_pfVec,0.U.asTypeOf(s0_quiteUpdate_enq_pfVec.cloneType))
+    quiteUpdateQ.io.enq.valid := s1_quiteUpdate_enq_valid
+    quiteUpdateQ.io.enq.bits := s1_quiteUpdate_enq
+    quiteUpdateQ.io.enq.bits.pfVec := s1_quiteUpdate_enq_pfVec
+    quiteUpdateQ.io.flush := false.B
+
     val s1_pfOut_valid = WireInit(false.B)
     val s1_need_write = WireInit(s1_pfOut_valid);dontTouch(s1_need_write)
     // --------------------------------------------------------------------------------
@@ -1375,7 +1393,7 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
 
     //evictQ deq
     val s2_evictQ_needWrite = WireInit(evict_q.io.deq.fire);dontTouch(s2_evictQ_needWrite)
-    val s2_evictQ_used = evict_q.io.count
+    val s2_evictQ_used = RegNext(evict_q.io.count, 0.U)
 
 
     val s2_evictBlkAddr = WireInit(Cat(0.U((blkAddrBits-saved_blkAddrBits).W),evict_q.io.deq.bits));dontTouch(s2_evictBlkAddr)
@@ -1404,7 +1422,7 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     evict_q.io.enq.valid := RegNext(io.out_pfReq.fire,false.B) // if spp2llc , don't enq
     //drop highest bit
     evict_q.io.enq.bits := RegNext(get_saved_blkAddr(io.out_pfReq.bits.get_blkAddr),0.U)
-    evict_q.io.deq.ready := s2_evictQ_used > 64.U //(fTableQueueEntries-1).U;
+    evict_q.io.deq.ready := s2_evictQ_used > (fTableQueueEntries-1).U;
 
     s0_result := consensusTable(s0_rIdx)
     
