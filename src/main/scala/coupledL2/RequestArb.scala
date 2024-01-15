@@ -73,6 +73,11 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
       val blockSinkBReqEntrance = Bool()
       val blockMSHRReqEntrance = Bool()
     })
+    val toSinkB = Vec(1, new Bundle() {
+      val valid = Bool()
+      val tag = UInt(tagBits.W)
+      val set = UInt(setBits.W)
+    })
   })
 
   /* ======== Reset ======== */
@@ -95,8 +100,19 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
     mshr_task_s1.bits.opcode === HintAck && mshr_task_s1.bits.dsWen
   )
 
+  val block_A = WireInit(false.B)
+  val block_B = WireInit(false.B)
+  val block_C = WireInit(false.B)
+
+  val sinkB_full_s1 = RegInit(false.B)
 
   /* ======== Stage 0 ======== */
+  val sinkB_bits_s0 = io.sinkB.bits
+  val sinkB_fire_s0 = io.sinkB.fire
+  val sinkB_ready_s0 = !sinkB_full_s1
+
+  io.sinkB.ready := sinkB_ready_s0
+
   // if mshr_task_s1 is replRead, it might stall and wait for dirRead.ready, so we block new mshrTask from entering
   // TODO: will cause msTask path vacant for one-cycle after replRead, since not use Flow so as to avoid ready propagation
   io.mshrTask.ready := !io.fromGrantBuffer.blockMSHRReqEntrance && !s1_needs_replRead && !io.fromSourceC.blockMSHRReqEntrance
@@ -104,6 +120,20 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
   mshr_task_s0.bits := io.mshrTask.bits
 
   /* ======== Stage 1 ======== */
+  val sinkB_bits_s1 = RegEnable(sinkB_bits_s0, sinkB_fire_s0)
+  val sinkB_valid_s1 = sinkB_full_s1
+  val sinkB_ok_s1 = WireInit(false.B)
+  val sinkB_fire_s1 = sinkB_valid_s1 && sinkB_ok_s1
+  dontTouch(sinkB_ok_s1)
+
+  when(sinkB_fire_s0) {
+    sinkB_full_s1 := true.B
+  }.elsewhen(sinkB_fire_s1) {
+    sinkB_full_s1 := false.B
+  }
+
+  val sinkB_blockA = io.sinkB.fire || (sinkB_valid_s1 && io.sinkA.bits.tag === sinkB_bits_s1.tag && io.sinkA.bits.set === sinkB_bits_s1.set)
+
   /* latch mshr_task from s0 to s1 */
   val mshr_replRead_stall = mshr_task_s1.valid && s1_needs_replRead && (!io.dirRead_s1.ready || io.fromMainPipe.blockG_s1)
 
@@ -114,7 +144,7 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
 
   /* Channel interaction from s1 */
   val A_task = io.sinkA.bits
-  val B_task = io.sinkB.bits
+  val B_task = sinkB_bits_s1
   val C_task = io.sinkC.bits
 
   // mp s2 and s3 block A req
@@ -131,19 +161,19 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
   block_B_continuous := io.sinkB.fire
 
   // block chnl
-  val block_A = io.fromMSHRCtl.blockA_s1 || mp_blockA_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockA_s1
-  val block_B = io.fromMSHRCtl.blockB_s1 || io.fromMainPipe.blockB_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockB_s1 || block_B_continuous || io.fromSourceC.blockSinkBReqEntrance
-  val block_C = io.fromMSHRCtl.blockC_s1 || io.fromMainPipe.blockC_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockC_s1
+  block_A := io.fromMSHRCtl.blockA_s1 || mp_blockA_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockA_s1 || sinkB_blockA
+  block_B := io.fromMSHRCtl.blockB_s1 || io.fromMainPipe.blockB_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockB_s1 || block_B_continuous || io.fromSourceC.blockSinkBReqEntrance
+  block_C := io.fromMSHRCtl.blockC_s1 || io.fromMainPipe.blockC_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockC_s1
 
   val sinkValids = VecInit(Seq(
     io.sinkC.valid && !block_C,
-    io.sinkB.valid && !block_B,
+    sinkB_valid_s1 && !block_B,
     io.sinkA.valid && !block_A
   )).asUInt
 
   val sink_ready_basic = io.dirRead_s1.ready && resetFinish && !mshr_task_s1.valid
   io.sinkA.ready := sink_ready_basic && !block_A && !sinkValids(1) && !sinkValids(0) // SinkC prior to SinkA & SinkB
-  io.sinkB.ready := sink_ready_basic && !block_B && !sinkValids(0) // SinkB prior to SinkA
+  sinkB_ok_s1 := sink_ready_basic && !block_B && !sinkValids(0) // SinkB prior to SinkA
   io.sinkC.ready := sink_ready_basic && !block_C
 
   val chnl_task_s1 = Wire(Valid(new TaskBundle()))
@@ -169,11 +199,16 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
   io.dirRead_s1.bits.mshrId := task_s1.bits.mshrId
 
   // block same-set A req
-  io.s1Entrance.valid := mshr_task_s1.valid && mshr_task_s1.bits.metaWen || io.sinkC.fire || io.sinkB.fire
+  val bSet_s1 = Mux(io.sinkB.fire, io.sinkB.bits.set, B_task.set)
+  val bTag_s1 = Mux(io.sinkB.fire, io.sinkB.bits.tag, B_task.tag)
+  dontTouch(bSet_s1)
+  dontTouch(bTag_s1)
+  
+  io.s1Entrance.valid := mshr_task_s1.valid && mshr_task_s1.bits.metaWen || io.sinkC.fire || io.sinkB.fire || sinkB_valid_s1
   io.s1Entrance.bits.set  := Mux(
     mshr_task_s1.valid && mshr_task_s1.bits.metaWen,
     mshr_task_s1.bits.set,
-    Mux(io.sinkC.fire, C_task.set, B_task.set)
+    Mux(io.sinkC.fire, C_task.set, bSet_s1)
   )
 
   /* ========  Stage 2 ======== */
@@ -211,14 +246,18 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
   require(beatSize == 2)
 
   /* status of each pipeline stage */
-  io.status_s1.sets := VecInit(Seq(C_task.set, B_task.set, 0.U, mshr_task_s1.bits.set)) // DontCare ASet
-  io.status_s1.tags := VecInit(Seq(C_task.tag, B_task.tag, 0.U, mshr_task_s1.bits.tag)) // DontCare ATag
+  io.status_s1.sets := VecInit(Seq(C_task.set, bSet_s1, 0.U, mshr_task_s1.bits.set)) // DontCare ASet
+  io.status_s1.tags := VecInit(Seq(C_task.tag, bTag_s1, 0.U, mshr_task_s1.bits.tag)) // DontCare ATag
   require(io.status_vec.size == 2)
   io.status_vec.zip(Seq(task_s1, task_s2)).foreach {
     case (status, task) =>
       status.valid := task.valid
       status.bits.channel := task.bits.channel
   }
+
+  io.toSinkB(0).valid := chnl_task_s1.valid
+  io.toSinkB(0).set := chnl_task_s1.bits.set
+  io.toSinkB(0).tag := chnl_task_s1.bits.tag
 
   dontTouch(io)
 

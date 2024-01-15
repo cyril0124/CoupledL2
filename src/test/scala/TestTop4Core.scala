@@ -97,7 +97,7 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
         echoField = Seq(huancun.DirtyField()),
         // prefetch = Some(BOPParameters(rrTableEntries = 16,rrTagBits = 6))
-        prefetch = None, // Some(HyperPrefetchParams()),
+        prefetch = Some(coupledL2.prefetch.HyperPrefetchParams()), // Some(HyperPrefetchParams()),
         /* del L2 prefetche recv option, move into: prefetch =  PrefetchReceiverParams
         prefetch options:
           SPPParameters          => spp only
@@ -105,7 +105,7 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
           PrefetchReceiverParams => sms+bop
           HyperPrefetchParams    => spp+bop+sms
         */
-        sppMultiLevelRefill = None, // Some(coupledL2.prefetch.PrefetchReceiverParams()),
+        // sppMultiLevelRefill = None, // Some(coupledL2.prefetch.PrefetchReceiverParams()),
         /*must has spp, otherwise Assert Fail
         sppMultiLevelRefill options:
         PrefetchReceiverParams() => spp has cross level refill
@@ -118,7 +118,12 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
     
     val binder = BankBinder(L2NBanks, L2BlockSize)
     l2binders = l2binders ++ Seq(binder)
-
+    l2.pf_recv_node match {
+      case Some(l2Recv) =>
+        val l1_sms_send_0_node = LazyModule(new PrefetchSmsOuterNode)
+        l2Recv := l1_sms_send_0_node.outNode
+      case None =>
+    }
     l2xbar := TLBuffer.chainNode(2) := TLClientsMerger() := TLXbar() :=* binder :*= l2.node :*= l1xbars(i)
 
     l2
@@ -134,7 +139,7 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
       inclusive = false,
       clientCaches = Seq(CacheParameters(sets = 32, ways = 4, blockGranularity = log2Ceil(32), name = "L2")),
       sramClkDivBy2 = true,
-      sramDepthDiv = 4,
+      sramDepthDiv = 8,
       dataBytes = 8,
       simulation = true,
       hasMbist = false,
@@ -144,7 +149,7 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
       dataECC = Some("secded"),
       ctrl = Some(huancun.CacheCtrl(
 //        address = 0x3900_0000
-        address = 0x390_0000
+        address = 0x3900_0000
       ))
     )
     case DebugOptionsKey => DebugOptions()

@@ -32,6 +32,8 @@ class InflightGrantEntry(implicit p: Parameters) extends L2Bundle {
   val set   = UInt(setBits.W)
   val tag   = UInt(tagBits.W)
   val sink  = UInt(mshrBits.W)
+  val isAccessAckData = Bool()
+  val source = UInt(16.W)
 }
 
 class TaskWithData(implicit p: Parameters) extends L2Bundle {
@@ -191,10 +193,10 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
 
   // =========== record unreceived GrantAck ===========
   // Addrs with Grant sent and GrantAck not received
-  val inflight_grant = RegInit(VecInit(Seq.fill(grantBufInflightSize){
+  val inflight_grant = RegInit(VecInit(Seq.fill(grantBufInflightSize + mshrsAll){
     0.U.asTypeOf(Valid(new InflightGrantEntry))
   }))
-  when (io.d_task.fire && (dtaskOpcode(2, 1) === Grant(2, 1))) {
+  when (io.d_task.fire && (dtaskOpcode(2, 1) === Grant(2, 1) || dtaskOpcode(2, 1) === AccessAckData(2, 1))) {
     // choose an empty entry
     val insertIdx = PriorityEncoder(inflight_grant.map(!_.valid))
     val entry = inflight_grant(insertIdx)
@@ -202,6 +204,8 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     entry.bits.set    := io.d_task.bits.task.set
     entry.bits.tag    := io.d_task.bits.task.tag
     entry.bits.sink   := io.d_task.bits.task.mshrId
+    entry.bits.isAccessAckData := dtaskOpcode(2, 1) === AccessAckData(2, 1)
+    entry.bits.source := io.d_task.bits.task.sourceId
   }
   val inflight_full = Cat(inflight_grant.map(_.valid)).andR
   if(cacheParams.enableAssert) assert(!inflight_full, "inflight_grant entries should not be full")
@@ -216,7 +220,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
 
   when (io.e.fire) {
     // compare sink to clear buffer
-    val sinkMatchVec = inflight_grant.map(g => g.valid && g.bits.sink === io.e.bits.sink)
+    val sinkMatchVec = inflight_grant.map(g => g.valid && g.bits.sink === io.e.bits.sink && !g.bits.isAccessAckData)
     if(cacheParams.enableAssert) assert(PopCount(sinkMatchVec) === 1.U, "GrantBuf: there must be one and only one match")
     val bufIdx = OHToUInt(sinkMatchVec)
     inflight_grant(bufIdx).valid := false.B
@@ -228,6 +232,13 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   dontTouch(isAccessAckDataFired)
   when(isAccessAckDataFired) {
       isLastAccessAckData := ~isLastAccessAckData
+  }
+
+  when (isAccessAckDataFired && isLastAccessAckData) {
+    val sinkMatchVec = inflight_grant.map(g => g.valid && g.bits.sink === io.d.bits.sink && g.bits.isAccessAckData && g.bits.source === io.d.bits.source)
+    if(cacheParams.enableAssert) assert(PopCount(sinkMatchVec) === 1.U, "GrantBuf: there must be one and only one match [Get]")
+    val bufIdx = OHToUInt(sinkMatchVec)
+    inflight_grant(bufIdx).valid := false.B
   }
 
 

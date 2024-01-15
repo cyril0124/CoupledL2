@@ -58,10 +58,10 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     val status_vec_toC = Vec(3, ValidIO(new PipeStatus))
 
     /* block sinkB */
-    val toSinkB = ValidIO(new Bundle() {
+    val toSinkB = Vec(4, new Bundle() {
+      val valid = Bool()
       val tag = UInt(tagBits.W)
       val set = UInt(setBits.W)
-      val willAllocMshr = Bool()
     })
 
     /* get dir result at stage 3 */
@@ -286,12 +286,15 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   val source_req_s3 = Wire(new TaskBundle)
   source_req_s3 := Mux(!mshr_req_s3, sink_resp_s3.bits, req_s3) // sink_req->resp, mshr_resp->resp
 
-  //  TODO: debug address consider multi-bank
-  def restoreAddr(set: UInt, tag: UInt) = {
-    (set << offsetBits).asUInt + (tag << (setBits + offsetBits)).asUInt
+  def restoreFullAddr(bank: UInt, set: UInt, tag: UInt) = {
+    (bank << offsetBits).asUInt + (set << (bankBits + offsetBits)).asUInt + (tag << (setBits + bankBits + offsetBits)).asUInt
   }
-  val debug_addr_s3 = restoreAddr(task_s3.bits.set, task_s3.bits.tag) // (task_s3.bits.set << offsetBits).asUInt + (task_s3.bits.tag << (setBits + offsetBits)).asUInt
-  dontTouch(debug_addr_s3)
+  val debug_addr_s3_vec = WireInit(VecInit(Seq.fill(1 << bankBits)(0.U(fullAddressBits.W))))
+  debug_addr_s3_vec.zipWithIndex.foreach {
+    case (addr, i) =>
+      addr := restoreFullAddr(i.asUInt, task_s3.bits.set, task_s3.bits.tag)
+  }
+  dontTouch(debug_addr_s3_vec)
 
   /* ======== Interact with DS ======== */
   val data_s3 = Mux(io.releaseBufResp_s3.valid, io.releaseBufResp_s3.bits.data, io.refillBufResp_s3.bits.data) // releaseBuf prior
@@ -658,10 +661,23 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   io.status_vec_toC(2).valid := c_s5.valid
   io.status_vec_toC(2).bits.channel := task_s5.bits.channel
 
-  io.toSinkB.valid := task_s3.valid
-  io.toSinkB.bits.tag := task_s3.bits.tag
-  io.toSinkB.bits.set := task_s3.bits.set
-  io.toSinkB.bits.willAllocMshr := io.toMSHRCtl.mshr_alloc_s3.valid
+  // signals used for block sinkB
+  io.toSinkB(0).valid := task_s2.valid
+  io.toSinkB(0).tag := task_s2.bits.tag
+  io.toSinkB(0).set := task_s2.bits.set
+
+  io.toSinkB(1).valid := task_s3.valid
+  io.toSinkB(1).tag := task_s3.bits.tag
+  io.toSinkB(1).set := task_s3.bits.set
+
+  io.toSinkB(2).valid := task_s4.valid
+  io.toSinkB(2).tag := task_s4.bits.tag
+  io.toSinkB(2).set := task_s4.bits.set
+
+  io.toSinkB(3).valid := task_s5.valid
+  io.toSinkB(3).tag := task_s5.bits.tag
+  io.toSinkB(3).set := task_s5.bits.set
+
 
   /* ======== Other Signals Assignment ======== */
   // Initial state assignment
