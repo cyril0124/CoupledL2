@@ -133,7 +133,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
       e.valid && sameAddr(in, e.task)
     )
   ).asUInt
-  val dup        = io.in.valid && isPrefetch && dupMask.orR
+  val dup        = io.in.fire && isPrefetch && dupMask.orR
 
   //!! TODO: we can also remove those that duplicate with mainPipe
 
