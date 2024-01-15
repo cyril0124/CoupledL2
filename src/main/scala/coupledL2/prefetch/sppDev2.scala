@@ -1100,7 +1100,7 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     val hint2llc_out = ValidIO(new PrefetchReq)
     val ctrl = Input(UInt(PfCtrlConst.FitlerTableConfig.bits.W))
   })
-  val ctrl_filter_sms = WireInit(io.ctrl(PfVectorConst.SMS));dontTouch(ctrl_filter_sms)
+  val ctrl_filter_sms = WireInit(!io.ctrl(PfVectorConst.SMS));dontTouch(ctrl_filter_sms)
   val ctrl_filter_bop = WireInit(io.ctrl(PfVectorConst.BOP));dontTouch(ctrl_filter_bop)
   val ctrl_filter_spp = WireInit(io.ctrl(PfVectorConst.SPP));dontTouch(ctrl_filter_spp)
   def hash1(addr:    UInt) = addr(log2Up(fTableEntries) - 1, 0)
@@ -1228,9 +1228,10 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     dontTouch(s0_skip_bop)
     dontTouch(s0_skip_spp)
     s0_can_send := io.in_pfReq.fire && (s0_skip_smp || s0_skip_bop || s0_skip_spp || (s0_can_flow_filter && (s0_flow_pfVec(io.in_pfReq.bits.get_blockOff) === PfSource.NONE)))
-    replay_Q0.io.enq <> io.in_pfReq
-    replay_Q0.io.enq.valid := io.in_pfReq.fire && !s0_can_flow_filter && !(s0_skip_smp || s0_skip_bop || s0_skip_spp)
-    replay_Q0.io.flush := false.B
+
+    val s0_replay_enq_valid = WireInit(io.in_pfReq.fire && !s0_can_flow_filter && !(s0_skip_smp || s0_skip_bop || s0_skip_spp))
+    val s0_replay_enq = WireInit(io.in_pfReq.bits)
+
     //only l2 pf req need go quiteUpdateQ
     quiteUpdateQ.io.enq.valid := s0_can_send && io.out_pfReq.fire
     quiteUpdateQ.io.enq.bits := io.out_pfReq.bits
@@ -1276,7 +1277,7 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     }.elsewhen(s0_flow_pfVec_need_replace){
       flowUpdate_Counter := 0.U
     }
-    val s0_flow_updateReset = WireInit(flowUpdate_Counter === 63.U)
+    val s0_flow_updateReset = WireInit(flowUpdate_Counter === 16.U)
     val s0_updateFlow_valid = WireInit(s0_flow_pfVec_need_replace || s0_flow_updateReset)
     // --------------------------------------------------------------------------------
     // stage 1
@@ -1345,6 +1346,13 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
         s1_wData(i).cVec := s1_wBitMap(i)
       }
     }
+    //replay
+    val s1_replayQ_enq_valid = RegNext(s0_replay_enq_valid,false.B)
+    val s1_replayQ_enq = RegNext(s0_replay_enq,0.U.asTypeOf(new PrefetchReq))
+    replay_Q0.io.enq.valid := s1_replayQ_enq
+    replay_Q0.io.enq := s1_replayQ_enq
+    replay_Q0.io.flush := false.B
+    
     val s1_pfOut_valid = WireInit(false.B)
     val s1_need_write = WireInit(s1_pfOut_valid);dontTouch(s1_need_write)
     // --------------------------------------------------------------------------------
@@ -1548,7 +1556,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
     //| fTConfig[1]  -> enable filter bop
     //| fTConfig[2]  -> enable fitter spp
   val ctrlSwitch = WireInit(PfCtrlConst.Switch.get_fields(io.l2_pf_ctrl));dontTouch(ctrlSwitch)
-  val ctrl_SMSen = WireInit(!ctrlSwitch(PfCtrlConst.Switch.SMS));dontTouch(ctrl_SMSen)
+  val ctrl_SMSen = WireInit(ctrlSwitch(PfCtrlConst.Switch.SMS));dontTouch(ctrl_SMSen)
   val ctrl_BOPen = WireInit(ctrlSwitch(PfCtrlConst.Switch.BOP));dontTouch(ctrl_BOPen)
   val ctrl_SPPen = WireInit(ctrlSwitch(PfCtrlConst.Switch.SPP));dontTouch(ctrl_SPPen)
 
