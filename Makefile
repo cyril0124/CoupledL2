@@ -1,3 +1,16 @@
+define append_log_and_status
+	@echo -e "/*" > temp.txt
+	@git log -1 >> temp.txt
+	@echo -e "*/\n" >> temp.txt
+
+	@echo -e "/*" >> temp.txt
+	@git status >> temp.txt
+	@echo -e "*/\n" >> temp.txt
+
+	@cat temp.txt  build/TestTop.v > temp_1 && mv temp_1 build/TestTop.v
+	@rm temp.txt
+endef
+
 init:
 	git submodule update --init
 	cd rocket-chip && git submodule update --init hardfloat cde
@@ -25,14 +38,17 @@ test-top-l2l3l2:
 test-top-fullsys:
 	mill -i CoupledL2.test.runMain coupledL2.TestTop_fullSys -td build | tee ./build/build.log
 	mv build/TestTop_fullSys.v build/TestTop.v
+	$(call append_log_and_status)
 
 test-top-fullsys-4Core:
 	mill -i CoupledL2.test.runMain coupledL2.TestTop_fullSys_4Core -td build | tee ./build/build.log
 	mv build/TestTop_fullSys_4Core.v build/TestTop.v
+	$(call append_log_and_status)
 
 test-top-fullsys-1Core:
 	mill -i CoupledL2.test.runMain coupledL2.TestTop_fullSys_1Core -td build | tee ./build/build.log
 	mv build/TestTop_fullSys_1Core.v build/TestTop.v
+	$(call append_log_and_status)
 
 
 test-top-fullsys_1:

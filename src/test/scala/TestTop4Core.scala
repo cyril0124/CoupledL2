@@ -7,6 +7,7 @@ import org.chipsalliance.cde.config._
 import chisel3.stage.ChiselGeneratorAnnotation
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import coupledL2.prefetch._
@@ -71,7 +72,9 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
 
   val mem_xbar = TLXbar()
   // val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffffL), beatBytes = 32)) // Normal rtl-based memory
-  val ram = LazyModule(new coupledL2.TLRAM(AddressSet(0, 0xffffffffffL), beatBytes = 32)) // DPI-C memory
+  // val ram = LazyModule(new coupledL2.TLRAM(AddressSet(0, 0xffffffffffL), beatBytes = 32)) // DPI-C memory
+  // val ram = LazyModule(new coupledL2.TLRAM_WithDRAMSim3(AddressSet(0, 0xffffffffffL), beatBytes = 32)) // DPI-C memory with DRAMsim3
+
 
   // Create L1 nodes
   (0 until nrL2).foreach{ i =>
@@ -204,17 +207,66 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
   )))
   l2xbar := TLBuffer() := AXI2TL(16, 16) := AXI2TLFragmenter() := l3FrontendAXI4Node
 
-  ram.node :=
-    mem_xbar :=*
-    TLXbar() :=*
-    TLFragmenter(32, 64) :=*
-    TLBuffer.chainNode(2) :=*
-    TLCacheCork() :=*
-    // TLDelayer(delayFactor) :=*
-    l3binder :*=
-    l3.node :*=
-    l2xbar
+  // has DRAMsim3 (TLRAM)
+  // ram.node :=
+  //   mem_xbar :=*
+  //   TLDelayer(0.4) :=*
+  //   TLBuffer.chainNode(4) :=*
+  //   TLDelayer(0.4) :=*
+  //   l3binder :*=
+  //   l3.node :*=
+  //   l2xbar
+  
+  // without DRAMsim3
+  // ram.node :=
+  //   mem_xbar :=*
+  //   TLXbar() :=*
+  //   TLFragmenter(32, 64) :=*
+  //   TLBuffer.chainNode(2) :=*
+  //   TLCacheCork() :=*
+  //   TLDelayer(delayFactor) :=*
+  //   l3binder :*=
+  //   l3.node :*=
+  //   l2xbar
 
+  // has DRAMsim3 (AXI4 RAM)
+    mem_xbar :=*
+      TLXbar() :=*
+      // TLFragmenter(32, 64) :=*
+      TLBuffer.chainNode(2) :=*
+      TLCacheCork() :=*
+      TLDelayer(delayFactor) :=*
+      l3binder :*=
+      l3.node :*=
+      l2xbar
+    
+    val PAddrBits = 37
+    val L3OuterBusWidth = 256
+    val memAddrMask = (1L << PAddrBits) - 1L
+    val memRange = AddressSet(0x00000000L, memAddrMask).subtract(AddressSet(0x00000000L, 0x7FFFFFFFL))
+
+    val ram = LazyModule(new AXI4Memory(
+      address = memRange, 
+      memByte = 16L * 1024 * 1024 * 1024, 
+      useBlackBox = true, 
+      executable = true,
+      beatBytes = L3OuterBusWidth / 8,
+      burstLen = L3BlockSize / (L3OuterBusWidth / 8)
+    ))
+
+    ram.node :=
+      AXI4Buffer() :=
+      AXI4Buffer() :=
+      AXI4Buffer() :=
+      AXI4IdIndexer(idBits = 14) :=
+      AXI4UserYanker() :=
+      AXI4Deinterleaver(L3BlockSize) :=
+      TLToAXI4() :=
+      TLSourceShrinker(64) :=
+      TLWidthWidget(L3OuterBusWidth / 8) :=
+      TLBuffer.chainNode(2) :=
+      mem_xbar
+  
   lazy val module = new LazyModuleImp(this) with HasPerfEvents{
     master_nodes.zipWithIndex.foreach {
       case (node, i) =>

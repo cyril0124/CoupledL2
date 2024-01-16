@@ -1,63 +1,69 @@
 
 package coupledL2
 
+import circt.stage.{ChiselStage, FirtoolOption}
+import chisel3.stage.ChiselGeneratorAnnotation
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import org.chipsalliance.cde.config._
 import chisel3.experimental.ExtModule
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.tilelink.TLMessages._
+import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 import freechips.rocketchip.util.property
-import xs.utils.MaskExpand
+import xs.utils
+import xs.utils.{MaskExpand, Pipeline, RegNextN}
 
-class RAMHelper(memByte: BigInt) extends ExtModule with HasExtModuleInline {
-  val DataBits = 64
+// class RAMHelper(memByte: BigInt) extends ExtModule with HasExtModuleInline {
+//   val DataBits = 64
 
-  val clk   = IO(Input(Clock()))
-  val en    = IO(Input(Bool()))
-  val rIdx  = IO(Input(UInt(DataBits.W)))
-  val rdata = IO(Output(UInt(DataBits.W)))
-  val wIdx  = IO(Input(UInt(DataBits.W)))
-  val wdata = IO(Input(UInt(DataBits.W)))
-  val wmask = IO(Input(UInt(DataBits.W)))
-  val wen   = IO(Input(Bool()))
+//   val clk   = IO(Input(Clock()))
+//   val en    = IO(Input(Bool()))
+//   val rIdx  = IO(Input(UInt(DataBits.W)))
+//   val rdata = IO(Output(UInt(DataBits.W)))
+//   val wIdx  = IO(Input(UInt(DataBits.W)))
+//   val wdata = IO(Input(UInt(DataBits.W)))
+//   val wmask = IO(Input(UInt(DataBits.W)))
+//   val wen   = IO(Input(Bool()))
 
-  val verilogLines = Seq(
-    """  module RAMHelper(""",
-    """    input         clk,""",
-    """    input         en,""",
-    """    input  [63:0] rIdx,""",
-    """    output [63:0] rdata,""",
-    """    input  [63:0] wIdx,""",
-    """    input  [63:0] wdata,""",
-    """    input  [63:0] wmask,""",
-    """    input         wen""",
-    """  );""",
-    """  import "DPI-C" function void ram_write_helper (""",
-    """    input  longint    wIdx,""",
-    """    input  longint    wdata,""",
-    """    input  longint    wmask,""",
-    """    input  bit        wen""",
-    """  );""",
-    "",
-    """  import "DPI-C" function longint ram_read_helper (""",
-    """    input  bit        en,""",
-    """    input  longint    rIdx""",
-    """  );""",
-    "",
-    "",
-    """    assign rdata = ram_read_helper(en, rIdx);""",
-    "",
-    """    always @(posedge clk) begin""",
-    """      ram_write_helper(wIdx, wdata, wmask, wen && en);""",
-    """    end""",
-    "",
-    """  endmodule"""
-  )
+//   val verilogLines = Seq(
+//     """  module RAMHelper(""",
+//     """    input         clk,""",
+//     """    input         en,""",
+//     """    input  [63:0] rIdx,""",
+//     """    output [63:0] rdata,""",
+//     """    input  [63:0] wIdx,""",
+//     """    input  [63:0] wdata,""",
+//     """    input  [63:0] wmask,""",
+//     """    input         wen""",
+//     """  );""",
+//     """  import "DPI-C" function void ram_write_helper (""",
+//     """    input  longint    wIdx,""",
+//     """    input  longint    wdata,""",
+//     """    input  longint    wmask,""",
+//     """    input  bit        wen""",
+//     """  );""",
+//     "",
+//     """  import "DPI-C" function longint ram_read_helper (""",
+//     """    input  bit        en,""",
+//     """    input  longint    rIdx""",
+//     """  );""",
+//     "",
+//     "",
+//     """    assign rdata = ram_read_helper(en, rIdx);""",
+//     "",
+//     """    always @(posedge clk) begin""",
+//     """      ram_write_helper(wIdx, wdata, wmask, wen && en);""",
+//     """    end""",
+//     "",
+//     """  endmodule"""
+//   )
 
-  setInline(s"$desiredName.v", verilogLines.mkString("\n"))
-}
+//   setInline(s"$desiredName.v", verilogLines.mkString("\n"))
+// }
 
 class TLRAMErrors(val params: ECCParams, val addrBits: Int) extends Bundle with CanHaveErrors {
   val correctable   = (params.code.canCorrect && params.notifyErrors).option(Valid(UInt(addrBits.W)))
@@ -385,6 +391,381 @@ class TLRAM(
   }
 }
 
+
+// class MemoryRequestHelper(requestType: Int)
+//   extends ExtModule(Map("REQUEST_TYPE" -> requestType))
+//     with HasExtModuleInline
+// {
+//   val clock     = IO(Input(Clock()))
+//   val reset     = IO(Input(Reset()))
+//   val io = IO(new Bundle {
+//     val req = Flipped(ValidIO(new Bundle {
+//       val addr = UInt(64.W)
+//       val id   = UInt(32.W)
+//     }))
+//     val response = Output(Bool())
+//   })
+
+//   val verilogLines = Seq(
+//     "import \"DPI-C\" function bit memory_request (",
+//     "  input longint address,",
+//     "  input int id,",
+//     "  input bit isWrite",
+//     ");",
+//     "",
+//     "module MemoryRequestHelper #(",
+//     "  parameter REQUEST_TYPE",
+//     ")(",
+//     "  input             clock,",
+//     "  input             reset,",
+//     "  input             io_req_valid,",
+//     "  input      [63:0] io_req_bits_addr,",
+//     "  input      [31:0] io_req_bits_id,",
+//     "  output reg        io_response",
+//     ");",
+//     "",
+//     "always @(posedge clock or posedge reset) begin",
+//     "  if (reset) begin",
+//     "    io_response <= 1'b0;",
+//     "  end",
+//     "  else if (io_req_valid) begin",
+//     "    io_response <= memory_request(io_req_bits_addr, io_req_bits_id, REQUEST_TYPE);",
+//     "  end",
+//     "  else begin",
+//     "    io_response <= 1'b0;",
+//     "  end",
+//     "end",
+//     "",
+//     "endmodule"
+//   )
+//   setInline(s"$desiredName.v", verilogLines.mkString("\n"))
+// }
+
+// class MemoryResponseHelper(requestType: Int)
+//   extends ExtModule(Map("REQUEST_TYPE" -> requestType))
+//     with HasExtModuleInline
+// {
+//   val clock    = IO(Input(Clock()))
+//   val reset    = IO(Input(Reset()))
+//   val enable   = IO(Input(Bool()))
+//   val response = IO(Output(UInt(64.W)))
+
+//   val verilogLines = Seq(
+//     "import \"DPI-C\" function longint memory_response (",
+//     "  input bit isWrite",
+//     ");",
+//     "",
+//     "module MemoryResponseHelper #(",
+//     "  parameter REQUEST_TYPE",
+//     ")(",
+//     "  input             clock,",
+//     "  input             reset,",
+//     "  input             enable,",
+//     "  output reg [63:0] response",
+//     ");",
+//     "",
+//     "always @(posedge clock or posedge reset) begin",
+//     "  if (reset) begin",
+//     "    response <= 64'b0;",
+//     "  end",
+//     "  else if (!reset && enable) begin",
+//     "    response <= memory_response(REQUEST_TYPE);",
+//     "  end",
+//     " else begin",
+//     "    response <= 64'b0;",
+//     "  end",
+//     "end",
+//     "",
+//     "endmodule"
+//   )
+//   setInline(s"$desiredName.v", verilogLines.mkString("\n"))
+// }
+
+
+// trait MemoryHelper { this: Module =>
+//   private def requestType(isWrite: Boolean): Int = if (isWrite) 1 else 0
+//   private def request(valid: Bool, addr: UInt, id: UInt, isWrite: Boolean): Bool = {
+//     val helper = Module(new MemoryRequestHelper(requestType(isWrite)))
+//     helper.clock := clock
+//     helper.reset := reset
+//     helper.io.req.valid := valid
+//     helper.io.req.bits.addr := addr
+//     helper.io.req.bits.id := id
+//     helper.io.response
+//   }
+//   protected def readRequest(valid: Bool, addr: UInt, id: UInt): Bool =
+//     request(valid, addr, id, false)
+//   protected def writeRequest(valid: Bool, addr: UInt, id: UInt): Bool =
+//     request(valid, addr, id, true)
+//   private def response(enable: Bool, isWrite: Boolean): (Bool, UInt) = {
+//     val helper = Module(new MemoryResponseHelper(requestType(isWrite)))
+//     helper.clock := clock
+//     helper.reset := reset
+//     helper.enable := enable
+//     (helper.response(32), helper.response(31, 0))
+//   }
+//   protected def readResponse(enable: Bool): (Bool, UInt) =
+//     response(enable, false)
+//   protected def writeResponse(enable: Bool): (Bool, UInt) =
+//     response(enable, true)
+// }
+
+class TLRAM_WithDRAMSim3(
+    address: AddressSet,
+    cacheable: Boolean = true,
+    executable: Boolean = true,
+    atomics: Boolean = false,
+    beatBytes: Int = 4, // 32
+    ecc: ECCParams = ECCParams(),
+    sramReg: Boolean = false, // drive SRAM data output directly into a register => 1 cycle longer response
+    val devName: Option[String] = None,
+    val dtsCompat: Option[Seq[String]] = None,
+    val devOverride: Option[Device with DeviceRegName] = None
+  )(implicit p: Parameters) extends DiplomaticSRAM(address, beatBytes, devName, dtsCompat, devOverride)
+{
+  val eccBytes = ecc.bytes
+  val code = ecc.code
+  require (eccBytes  >= 1 && isPow2(eccBytes))
+  require (beatBytes >= 1 && isPow2(beatBytes))
+  require (eccBytes <= beatBytes, s"TLRAM eccBytes (${eccBytes}) > beatBytes (${beatBytes}). Use a WidthWidget=>Fragmenter=>SRAM if you need high density and narrow ECC; it will do bursts efficiently")
+
+  val node = TLManagerNode(Seq(TLSlavePortParameters.v1(
+    Seq(TLSlaveParameters.v1(
+      address            = List(address),
+      resources          = resources,
+      regionType         = RegionType.CACHED,
+      executable         = executable,
+      supportsAcquireT   = TransferSizes(1, 64),
+      supportsAcquireB   = TransferSizes(1, 64),
+      fifoId             = None)), // requests are handled in order
+    beatBytes  = beatBytes,
+    endSinkId = 32,
+    minLatency = 1))) // no bypass needed for this device
+
+  val notifyNode = ecc.notifyErrors.option(BundleBridgeSource(() => new TLRAMErrors(ecc, log2Ceil(address.max)).cloneType))
+
+  private val outer = this
+
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) with MemoryHelper {
+    val (in, edge) = node.in(0)
+    dontTouch(in)
+
+    // internal parameters
+    val blockBytes = 64
+    val splitBytes = 8
+    val split = blockBytes / splitBytes
+    val nrBeat = blockBytes / beatBytes
+    require(nrBeat == 2)
+    
+    // data width of each ramHelper is 64-bit ==> 8 Bytes
+    val ramHelper = Seq.fill(split)(Module(new RAMHelper(8)))
+
+    // memorys for the outstanding request
+    val maxOutstanding = 1 << in.a.bits.source.getWidth
+    val rdAddrMem = Mem(maxOutstanding, UInt(in.a.bits.address.getWidth.W))
+    val wrAddrMem = Mem(maxOutstanding, UInt(in.a.bits.address.getWidth.W))
+
+    // always receive e 
+    in.e.ready := true.B
+
+    // edge counters
+    val (a_first, a_last, a_done, a_count) = edge.count(in.a)
+    val (c_first, c_last, c_done, c_count) = edge.count(in.c)
+    val (_, _, d_done, d_count) = edge.count(in.d)
+
+    // channel d counter
+    val d_first, d_last = WireInit(false.B)
+    val d_counter = RegInit(false.B)
+
+    when(in.d.fire) {
+      d_counter := ~d_counter
+    }
+    d_first := ~d_counter
+    d_last := d_counter
+
+    dontTouch(a_first)
+    dontTouch(a_last)
+    dontTouch(c_first)
+    dontTouch(c_last)
+    dontTouch(d_first)
+    dontTouch(d_last)
+
+
+    val isAcquireBlock = in.a.bits.opcode === AcquireBlock
+    val isAcquirePerm = in.a.bits.opcode === AcquirePerm
+    val isAcquire = isAcquireBlock || isAcquirePerm
+    val isGet = in.a.bits.opcode === Get
+    val isReleaseData = in.c.bits.opcode === ReleaseData
+    val isRelease = in.c.bits.opcode === Release
+    val isPutFullData = in.a.bits.opcode === PutFullData
+    val isPutPartialData = in.a.bits.opcode === PutPartialData
+    val isPut = isPutFullData || isPutPartialData
+    assert((in.a.valid && (isAcquireBlock || isAcquirePerm || isGet || isPut) ) || !in.a.valid)
+
+    // TODO: Release
+    assert(!(in.a.bits.opcode === AcquirePerm && in.a.fire))
+    assert(!(in.c.bits.opcode === Release && in.a.fire))
+    assert(!(in.a.fire && (in.a.bits.param =/= NtoT && in.a.bits.param =/= NtoB)))
+    assert(!(in.c.fire && in.c.bits.param =/= TtoN))
+    
+    val ren = (isAcquire || isGet) && in.a.fire && a_first
+    val wen = (isReleaseData && in.c.fire && c_first) || (isPut && in.a.fire && a_first)
+    val en = ren || wen
+    val rAddr = Mux(ren, in.a.bits.address, RegEnable(in.a.bits.address, in.a.fire && a_first))
+    val rSourceId = Mux(ren, in.a.bits.source, RegEnable(in.a.bits.source, in.a.fire && a_first))
+    val wAddr = Mux(wen, in.c.bits.address, RegEnable(in.c.bits.address, in.c.fire && c_first))
+    val wSourceId = Mux(wen, in.c.bits.source, RegEnable(in.c.bits.source, in.c.fire && c_first))
+    assert(!(ren && wen))
+
+
+    // save read address, this is used for d resp
+    val readReqCounter = RegInit(0.U(log2Ceil(maxOutstanding).W))
+    val writeReqCounter = RegInit(0.U(log2Ceil(maxOutstanding).W))
+    dontTouch(readReqCounter)
+    dontTouch(writeReqCounter)
+
+    val isA = in.a.fire && a_first
+    val isC = in.c.fire && c_first
+    val isD = in.d.fire && d_first
+
+    // accumulate request counter
+    when(isA && isD && in.d.bits.opcode === GrantData) {
+      // do nothing
+    }.elsewhen(isC && isD && in.d.bits.opcode === ReleaseAck) {
+      // do nothing
+    }.elsewhen(in.a.fire && a_first) {
+      assert(!in.c.fire)
+
+      when(ren && a_first) {
+        readReqCounter := readReqCounter + 1.U
+        assert(readReqCounter < maxOutstanding.U)
+      }
+    }.elsewhen(in.c.fire && c_first) {
+      assert(!in.a.fire)
+
+      when(wen && c_first) {
+        writeReqCounter := writeReqCounter + 1.U
+        assert(readReqCounter < maxOutstanding.U)
+      }
+    }.elsewhen(in.d.fire && d_first) {
+      when(in.d.bits.opcode === GrantData) {
+        readReqCounter := readReqCounter - 1.U
+        assert(readReqCounter > 0.U)
+      }
+      when(in.d.bits.opcode === ReleaseAck) {
+        writeReqCounter := writeReqCounter - 1.U
+        assert(writeReqCounter > 0.U)
+      }
+    }
+
+    when(in.a.fire && a_first) {
+      val idx = in.a.bits.source
+      rdAddrMem.write(idx, in.a.bits.address)
+    }
+
+    when(in.c.fire && c_first) {
+      val idx = in.c.bits.source
+      wrAddrMem.write(idx, in.c.bits.address)
+    }
+
+    
+    // check whether DRAM could accept the incoming request
+    val readReady, writeReady = WireInit(false.B)
+    val readReqNotAccept, writeReqNotAccept = RegInit(false.B)
+    val pendingReadNeedReq = !readReady && readReqNotAccept
+    val pendingWriteNeedReq = !writeReady && writeReqNotAccept
+    readReady := readRequest(ren && !readReady || pendingReadNeedReq, rAddr, rSourceId)
+    writeReady := writeRequest(wen && !writeReady || pendingWriteNeedReq, wAddr, wSourceId)
+
+    in.a.ready := !readReqNotAccept
+    in.c.ready := !writeReqNotAccept
+
+    when(in.a.fire && a_first) {
+      readReqNotAccept := true.B
+    }.elsewhen(readReady) {
+      readReqNotAccept := false.B
+    }
+    when(in.c.fire && c_first) {
+      writeReqNotAccept := true.B
+    }.elsewhen(writeReady) {
+      writeReqNotAccept := false.B
+    }
+
+    dontTouch(readReady)
+    dontTouch(writeReady)
+
+    // deal with dramsim3 respond
+    val hasReadReq = readReqCounter =/= 0.U
+    val hasWriteReq = writeReqCounter =/= 0.U
+    val enableReadResp, enableWriteResp = WireInit(false.B)
+    dontTouch(hasReadReq)
+    dontTouch(hasWriteReq)
+    dontTouch(enableReadResp)
+    dontTouch(enableWriteResp)
+
+    val (readRespValid, readRespId) = readResponse(enableReadResp)
+    val (writeRespValid, writeRespId) = writeResponse(enableWriteResp)
+    assert(!(readRespValid && writeRespValid))
+    dontTouch(readRespValid)
+    dontTouch(writeRespValid)
+    dontTouch(readRespId)
+    dontTouch(writeRespId)
+
+    val readRespValidReg = RegInit(false.B)
+    val readRespIdReg = RegInit(0.U(in.d.bits.source.getWidth.W))
+    enableReadResp := !(readRespValid || readRespValidReg)
+    when(readRespValid && !readRespValidReg && (!in.d.fire && d_first || in.d.fire && !d_last)) {
+      readRespValidReg := true.B
+      readRespIdReg := readRespId
+    }.elsewhen(!readRespValid && readRespValidReg && in.d.fire && d_last) {
+      readRespValidReg := false.B
+    }
+
+    val writeRespValidReg = RegInit(false.B)
+    val writeRespIdReg = RegInit(0.U(in.d.bits.source.getWidth.W))
+    enableWriteResp := !(writeRespValid || writeRespValidReg)
+    when(writeRespValid && !writeRespValidReg && !in.d.fire && d_first) {
+      writeRespValidReg := true.B
+      writeRespIdReg := writeRespId
+    }.elsewhen(!writeRespValid && writeRespValidReg && in.d.fire && d_last) {
+      writeRespValidReg := false.B
+    }
+
+    val isAcquireRespValid = readRespValid || readRespValidReg
+    val isReleaseRespValid = writeRespValid || writeRespValidReg
+    dontTouch(isAcquireRespValid)
+    dontTouch(isReleaseRespValid)
+    in.d.valid := isAcquireRespValid || isReleaseRespValid
+    in.d.bits := DontCare
+    in.d.bits.opcode := Mux(isAcquireRespValid, GrantData, ReleaseAck)
+    in.d.bits.param := Mux(isAcquireRespValid, toT, DontCare)
+    in.d.bits.size := log2Ceil(blockBytes).U
+    in.d.bits.source := Mux(isAcquireRespValid, Mux(readRespValid, readRespId, readRespIdReg), Mux(writeRespValid, writeRespId, writeRespIdReg))
+
+    // interact with ramHelper
+    val rdAddrFromMem = rdAddrMem.read(Mux(readRespValid, readRespId, readRespIdReg))
+    dontTouch(rdAddrFromMem)
+    val addr = Mux(wen && c_last, in.c.bits.address, rdAddrFromMem)
+    val index = Cat(mask.zip((addr >> log2Ceil(beatBytes)).asBools).filter(_._1).map(_._2).reverse)
+    val wdata = Cat(RegEnable(in.c.bits.data, in.c.fire && c_first), in.c.bits.data)
+    ramHelper.zipWithIndex map { case (mem, i) =>
+      mem.clk := clock
+      mem.en := !reset.asBool && (isAcquireRespValid && in.d.fire || wen && in.c.fire)
+      mem.rIdx := (index << log2Up(split)) + i.U
+      mem.wIdx := (index << log2Up(split)) + i.U
+
+      mem.wdata := wdata((i + 1) * 64 - 1, i * 64)
+      mem.wmask := MaskExpand("b11111111".U)
+      mem.wen := wen
+    }
+    val rdata_1 = Cat(ramHelper.map( mem => mem.rdata ).reverse).asUInt
+    val rdata_2 = rdata_1.asTypeOf(Vec(nrBeat, UInt(beatBytes.W)))
+    in.d.bits.data := rdata_2(d_last)
+  }
+}
+
+
 object TLRAM
 {
   def apply(
@@ -392,13 +773,86 @@ object TLRAM
     cacheable: Boolean = true,
     executable: Boolean = true,
     atomics: Boolean = false,
-    beatBytes: Int = 4,
+    beatBytes: Int = 32,
     ecc: ECCParams = ECCParams(),
     sramReg: Boolean = false,
     devName: Option[String] = None,
+    dynamicLatency: Boolean = false
   )(implicit p: Parameters): TLInwardNode =
   {
-    val ram = LazyModule(new TLRAM(address, cacheable, executable, atomics, beatBytes, ecc, sramReg, devName))
-    ram.node
+    val ram = if(!dynamicLatency) {
+      LazyModule(new TLRAM(address, cacheable, executable, atomics, beatBytes, ecc, sramReg, devName)).node
+    } else {
+      LazyModule(new TLRAM_WithDRAMSim3(address, cacheable, executable, atomics, beatBytes, ecc, sramReg, devName)).node
+    }
+    ram
   }
+}
+
+class TestTopTLRAM()(implicit p: Parameters) extends LazyModule {
+  
+  val blockBytes = 64
+  val beatBytes = 32
+
+  val client = TLClientNode(Seq(
+      TLMasterPortParameters.v2(
+        masters = Seq(
+          TLMasterParameters.v1(
+            name = "client",
+            sourceId = IdRange(0, 32),
+            supportsProbe = TransferSizes(64)
+          )
+        ),
+        channelBytes = TLChannelBeatBytes(32),
+      )
+  ))
+
+  val ram = TLRAM(AddressSet(0, 0xffffffffffL), beatBytes = 32, dynamicLatency = true)
+
+  val mem_xbar = TLXbar()
+
+  // ram :=
+  //   mem_xbar :=*
+  //   TLXbar() :=*
+  //   TLFragmenter(32, 64) :=*
+  //   TLBuffer.chainNode(2) :=*
+  //   TLCacheCork() :=
+  //   client
+
+  ram := TLDelayer(0.2) := TLBuffer.chainNode(2) := TLDelayer(0.2) := client
+
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
+    val io = IO(new Bundle{
+      val test = Input(Bool())
+    })
+
+    client.makeIOs()(ValName("master_port"))
+
+    dontTouch(io)
+  }
+
+}
+
+object TestTopTLRAM extends App
+{
+    println("hello from TestTopTLRAM")
+
+    val config = new Config(Parameters.empty)
+    
+    // EnableMonitors DisableMonitors
+    val top = DisableMonitors(p => LazyModule(new TestTopTLRAM()(p)))(config)
+
+    (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
+      FirtoolOption("-O=release"),
+      FirtoolOption("--disable-all-randomization"),
+      FirtoolOption("--disable-annotation-unknown"),
+      FirtoolOption("--strip-debug-info"),
+      FirtoolOption("--lower-memories"),
+      FirtoolOption("--lowering-options=noAlwaysComb," +
+        " disallowPortDeclSharing, disallowLocalVariables," +
+        " emittedLineLength=120, explicitBitcast, locationInfoStyle=plain," +
+      " disallowExpressionInliningInPorts, disallowMuxInlining"),
+      ChiselGeneratorAnnotation(() => top.module),
+    ))
 }
