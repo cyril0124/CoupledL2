@@ -815,8 +815,8 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
       s2_C_A,
       GenMask.apply(0),
       Seq(
-        LOW_COV_LOW_ACC   -> "b0000".U,
-        LOW_COV_HIGH_ACC  -> "b0011".U,
+        LOW_COV_LOW_ACC   -> "b0001".U,
+        LOW_COV_HIGH_ACC  -> "b1111".U,
         HIGH_COV_LOW_ACC  -> "b0000".U,
         HIGH_COV_HIGH_ACC -> "b0001".U,
     )
@@ -1685,14 +1685,14 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   // --------------------------------------------------------------------------------
   // seperate eache prefetcher perf counter
   def get_perfState(perfCounter:UInt, allIssued:UInt, perf_state: UInt)={
-    when((perfCounter << 2) > allIssued + allIssued + allIssued) {
+    when((perfCounter << 1) > allIssued) {
       perf_state := 3.U
-    } .elsewhen((perfCounter << 1) > allIssued) {
-      perf_state := 2.U
     } .elsewhen((perfCounter << 2) > allIssued) {
-      perf_state := 1.U
-    } .otherwise {
+      perf_state := 2.U
+    } .elsewhen(perfCounter === 0.U && allIssued =/= 0.U){
       perf_state := 0.U
+    }.otherwise {
+      perf_state := 2.U
     }
   }
   class globalCounter extends HyperPrefetchDev2Bundle{
