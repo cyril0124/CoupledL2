@@ -28,7 +28,7 @@ case class BOPParameters(
   rrTableEntries: Int = 256,
   rrTagBits:      Int = 12,
   scoreBits:      Int = 5,
-  roundMax:       Int = 31,
+  roundMax:       Int = 50,
   badScore:       Int = 1,
   offsetList: Seq[Int] = Seq(
     -32, -30, -27, -25, -24, -20, -18, -16, -15,
