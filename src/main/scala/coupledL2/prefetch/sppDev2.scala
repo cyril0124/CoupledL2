@@ -66,6 +66,14 @@ object PfVectorConst extends {
   val DEFAULT = 0.U(bits.W)
 }
 
+object PfGhrSate {
+  val bits = 2
+  def HIGH     = 3.U(bits.W)
+  def MEDIUM   = 2.U(bits.W)
+  def LOW      = 1.U(bits.W)
+  def ZERO     = 0.U(bits.W)
+}
+
 object PfcovState {
   val bits = 1
   def HIGH     = 0.U(bits.W)
@@ -88,7 +96,7 @@ case class SPPParameters(
   signatureBits: Int = 12,
   fTableEntries: Int = 32,
   enable_bp: Boolean =true,
-  enable_nextline: Boolean = false,
+  enable_nextline: Boolean = true,
 )
     extends PrefetchParameters {
   override val hasPrefetchBit:  Boolean = true
@@ -283,8 +291,8 @@ class ReplaceableQueue_pipe[T <: Data](val gen: T, val entries: Int) extends Mod
 }
 
 class GhrForSpp(implicit p:  Parameters) extends  SPPBundle{
-    val l2_deadCov_state = UInt(PfcovState.bits.W)
-    val l2_hitAcc_state = UInt(PfaccState.bits.W)
+    val l2_spp_CovState = UInt(PfGhrSate.bits.W)
+    val l2_hitAccState = UInt(PfGhrSate.bits.W)
     val shareBO = SInt(shareBOBits.W)
     val global_queue_used = (UInt(6.W))   
 }
@@ -797,8 +805,8 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   def HIGH_COV_LOW_ACC  = "b10".U
   def HIGH_COV_HIGH_ACC = "b11".U
   
-  val s2_AccMap= io.from_ghr.bits.l2_hitAcc_state
-  val s2_CovMap= io.from_ghr.bits.l2_deadCov_state
+  val s2_AccMap= io.from_ghr.bits.l2_hitAccState > 0.U
+  val s2_CovMap= io.from_ghr.bits.l2_spp_CovState > 0.U
   val s2_C_A = WireInit(Cat(s2_CovMap,s2_AccMap));dontTouch(s2_C_A)
   val s2_NL_ctrlMask = WireInit(0.U(4.W));dontTouch(s2_NL_ctrlMask)
   s2_NL_ctrlMask := Mux(io.ctrl.en_Nextline_Agreesive,
@@ -807,9 +815,9 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
       s2_C_A,
       GenMask.apply(0),
       Seq(
-        LOW_COV_LOW_ACC   -> "b0001".U,
-        LOW_COV_HIGH_ACC  -> "b1111".U,
-        HIGH_COV_LOW_ACC  -> "b0001".U,
+        LOW_COV_LOW_ACC   -> "b0000".U,
+        LOW_COV_HIGH_ACC  -> "b0011".U,
+        HIGH_COV_LOW_ACC  -> "b0000".U,
         HIGH_COV_HIGH_ACC -> "b0001".U,
     )
   ))
@@ -1695,7 +1703,9 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
     val l1pf_issued = UInt(7.W)
   }
   val ghr_l1pf_hitAccState = WireInit(0.U(PfaccState.bits.W))
-  val ghr_l2pf_hitAccState = WireInit(0.U(PfaccState.bits.W)) 
+  val ghr_l2pf_hitAccState = WireInit(0.U(PfaccState.bits.W))
+  val ghr_l2Pfspp_CovState = WireInit(0.U(PfaccState.bits.W))
+
   val ghr = RegInit(0.U.asTypeOf(new  globalCounter()));dontTouch(ghr)
   val ghr_coarse = RegInit(0.U.asTypeOf(new  globalCounter()));dontTouch(ghr_coarse)
   val ghr_last1Round = RegInit(0.U.asTypeOf(new  globalCounter()));dontTouch(ghr_last1Round)
@@ -1704,7 +1714,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   val ghr_last4Round = RegInit(0.U.asTypeOf(new  globalCounter()));dontTouch(ghr_last4Round)
   val ghr_avgRound = RegInit(0.U.asTypeOf(new  globalCounter()));dontTouch(ghr_avgRound)
   // fineGrain
-  val ghrCounter_fineGrain = Counter(io.l2_pf_en, 512)
+  val ghrCounter_fineGrain = Counter(io.l2_pf_en, 1024)
   val ghr_roundReset = WireInit(false.B);dontTouch(ghr_roundReset)
   val ghr_roundCnt = ghrCounter_fineGrain._1
   ghr_roundReset := ghrCounter_fineGrain._2
@@ -1716,7 +1726,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
 
   val deadPfEviction = RegInit(0.U(13.W))
   val issued = RegInit(0.U(16.W))
-  val pf_deadCov_state = WireInit(0.U(PfcovState.bits.W));dontTouch(pf_deadCov_state)
+  val pf_deadCov_state = WireInit(0.U(PfGhrSate.bits.W));dontTouch(pf_deadCov_state)
   when(io.evict.valid && io.evict.bits.is_prefetch) {
     deadPfEviction := deadPfEviction + 1.U
   }
@@ -1753,7 +1763,8 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
     ghr_last2Round := ghr_last1Round
     ghr_last3Round := ghr_last2Round
     ghr_last4Round := ghr_last3Round
-    get_perfState(ghr.l2pf_hitAcc, ghr.bop_issued + ghr.spp_issued, ghr_l2pf_hitAccState) 
+    get_perfState(ghr_avgRound.l2pf_hitAcc, ghr_avgRound.bop_issued + ghr_avgRound.spp_issued, ghr_l2pf_hitAccState)
+    get_perfState(ghr_avgRound.spp_issued, ghr_avgRound.bop_issued + ghr_avgRound.spp_issued, ghr_l2Pfspp_CovState)
   }
   when(ghr_roundReset_coarseGrain){
     ghr_coarse := 0.U.asTypeOf(new globalCounter())
@@ -1799,8 +1810,8 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
 
   spp.io.resp := DontCare
   spp.io.from_ghr.valid := ghr_roundReset
-  spp.io.from_ghr.bits.l2_deadCov_state := pf_deadCov_state
-  spp.io.from_ghr.bits.l2_hitAcc_state := ghr_l2pf_hitAccState
+  spp.io.from_ghr.bits.l2_spp_CovState := ghr_l2Pfspp_CovState
+  spp.io.from_ghr.bits.l2_hitAccState := ghr_l2pf_hitAccState
   spp.io.from_ghr.bits.shareBO := RegNext(bop.io.shareBO,0.S)
   spp.io.from_ghr.bits.global_queue_used := q_spp.io.full //RegNext(pftQueue.io.queue_used)
   spp.io.sppCtrl := ctrl_sppConfig
