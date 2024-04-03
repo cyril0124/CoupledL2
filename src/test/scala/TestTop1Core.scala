@@ -28,11 +28,11 @@ class TestTop_fullSys_1Core()(implicit p: Parameters) extends LazyModule {
   val l2Set = 256
   val l2Way = 8
 
-  val l3Set = 2048
+  val l3Set = 256
   val l3Way = 8
 
-  val L2NBanks = 2
-  val L3NBanks = 4
+  val L2NBanks = 1
+  val L3NBanks = 1
   val L2BlockSize = 64
   val L3BlockSize = 64
 
@@ -137,7 +137,7 @@ class TestTop_fullSys_1Core()(implicit p: Parameters) extends LazyModule {
       ways = l3Way,
       sets = l3Set,
       inclusive = false,
-      clientCaches = Seq(CacheParameters(sets = 2 * clientDirBytes / L2NBanks / l2Way / 64, ways = l2Way + 2, blockGranularity = log2Ceil(32), name = "L2")), 
+      clientCaches = Seq(CacheParameters(sets = l2Set, ways = l2Way + 2, blockGranularity = log2Ceil(32), name = "L2")),
       sramClkDivBy2 = true,
       sramDepthDiv = 8,
       dataBytes = 8,
