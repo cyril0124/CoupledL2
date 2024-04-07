@@ -15,6 +15,7 @@ import coupledL2.utils.HasPerfEvents
 import huancun.{HuanCun, HCCacheParameters, HCCacheParamsKey, CacheParameters, CacheCtrl}
 import xs.utils.GTimer
 import xs.utils.perf.{DebugOptions,DebugOptionsKey}
+import xs.utils.FileRegisters
 import utils.{TLClientsMerger}
 
 
@@ -242,6 +243,8 @@ class TestTop_fullSys_1Core()(implicit p: Parameters) extends LazyModule {
       mem_xbar
   
   lazy val module = new LazyModuleImp(this) with HasPerfEvents{
+    FileRegisters.add("graphml", graphML)
+
     master_nodes.zipWithIndex.foreach {
       case (node, i) =>
         node.makeIOs()(ValName(s"master_port_$i"))
@@ -321,4 +324,6 @@ object TestTop_fullSys_1Core extends App {
     FirtoolOption("-o=./build/rtl"),
     ChiselGeneratorAnnotation(() => top.module),
   ))
+
+  FileRegisters.write(filePrefix = "TestTop.")
 }
