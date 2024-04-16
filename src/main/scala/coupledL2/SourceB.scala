@@ -30,12 +30,15 @@ class GrantStatus(implicit p: Parameters) extends L2Bundle {
   val valid  = Bool()
   val set     = UInt(setBits.W)
   val tag     = UInt(tagBits.W)
+  val isAccessAckData = Bool()
 }
 
 class ProbeEntry(implicit p: Parameters) extends L2Bundle {
   val valid = Bool()
-  val rdy   = Bool()
+  val rdyG   = Bool()
   val waitG = UInt(sourceIdBits.W) // grantEntry probe is waiting for, sourceId as Idx
+  val rdyA = Bool()
+  val waitA = UInt(sourceIdBits.W) // probe must wait for AccessAckData with the same tag and set
   val task  = new SourceBReq()
 }
 
@@ -76,7 +79,15 @@ class SourceB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val conflictMask = io.grantStatus.map(s =>
     s.valid && s.set === io.task.bits.set && s.tag === io.task.bits.tag
   )
+  val conflictMaskA = io.grantStatus.map(s =>
+    s.valid && s.set === io.task.bits.set && s.tag === io.task.bits.tag && s.isAccessAckData
+  )
+  val conflictMaskG = io.grantStatus.map(s =>
+    s.valid && s.set === io.task.bits.set && s.tag === io.task.bits.tag && !s.isAccessAckData
+  )
   val conflict     = Cat(conflictMask).orR
+  val conflictA    = Cat(conflictMaskA).orR
+  val conflictG    = Cat(conflictMaskG).orR
 
   val noReadyEntry = Wire(Bool())
 
@@ -88,17 +99,23 @@ class SourceB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   when(alloc) {
     val p = probes(insertIdx)
     p.valid := true.B
-    p.rdy   := !conflict
-    p.waitG := OHToUInt(conflictMask)
+//    p.rdy   := !conflict
+//    p.waitG := OHToUInt(conflictMask)
+    p.rdyA := !conflictA
+    p.waitA := OHToUInt(conflictMaskA)
+    p.rdyG := !conflictG
+    p.waitG := OHToUInt(conflictMaskG)
     p.task  := io.task.bits
-    if(cacheParams.enableAssert) assert(PopCount(conflictMask) <= 1.U)
+//    if(cacheParams.enableAssert) {
+//      assert(PopCount(conflictMask) <= 1.U, "tag: 0x%x, set: 0x%x", io.task.bits.tag, io.task.bits.set)
+//    }
   }
 
   /* ======== Issue ======== */
   val issueArb = Module(new FastArbiter(new SourceBReq, entries))
   issueArb.io.in zip probes foreach{
     case (i, p) =>
-      i.valid := p.valid && p.rdy
+      i.valid := p.valid && p.rdyA && p.rdyG
       i.bits  := p.task
       when(i.fire) {
         p.valid := false.B
@@ -107,10 +124,14 @@ class SourceB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   issueArb.io.out.ready := io.sourceB.ready
   noReadyEntry := !issueArb.io.out.valid
 
-  /* ======== Update rdy ======== */
+  /* ======== Update rdyA/rdyG ======== */
   probes foreach { p =>
+    when(p.valid && !io.grantStatus(p.waitA).valid) {
+      p.rdyA := RegNext(true.B)
+//      p.rdy := RegNext(true.B) // cuz GrantData has 2 beats, can move RegNext elsewhere
+    }
     when(p.valid && !io.grantStatus(p.waitG).valid) {
-      p.rdy := RegNext(true.B) // cuz GrantData has 2 beats, can move RegNext elsewhere
+      p.rdyG := RegNext(true.B)
     }
   }
 
