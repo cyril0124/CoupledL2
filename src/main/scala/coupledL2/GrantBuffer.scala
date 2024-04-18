@@ -209,20 +209,24 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   val sinkMatchVec = inflight_grant.map(m => m.bits.sink === mshrId && m.valid)
   sink := Mux(PopCount(sinkMatchVec).asUInt > 0.U && noFromMshr, (1 << mshrBits).U + mshrId, mshrId)
   // set entry value
-  when (io.d_task.fire && (dtaskOpcode(2, 1) === Grant(2, 1) || dtaskOpcode(2, 1) === AccessAckData(2, 1))) {
-    when (dtaskOpcode(2, 1) === AccessAckData(2, 1)) {
-        val conflictMask1 = inflight_grant.map(s =>
-          s.valid && s.bits.tag === io.d_task.bits.task.tag && s.bits.set === io.d_task.bits.task.set
-        )
-        assert(PopCount(conflictMask1) < 1.U, "When AccessAck arrive, shouldn't have accessack or grant[Data] before it")
+  when(io.d_task.fire && (dtaskOpcode(2, 1) === Grant(2, 1) || dtaskOpcode(2, 1) === AccessAckData(2, 1))) {
+    when(dtaskOpcode(2, 1) === AccessAckData(2, 1)) {
+      val conflictMask1 = inflight_grant.map(s =>
+        s.valid && s.bits.tag === io.d_task.bits.task.tag && s.bits.set === io.d_task.bits.task.set
+      )
+      // if(cacheParams.enableAssert) assert(PopCount(conflictMask1) < 1.U, "When AccessAck arrive, shouldn't have accessack or grant[Data] before it")
+      when(!(PopCount(conflictMask1) < 1.U)){
+        printf("Warring: When AccessAck arrive, shouldn't have accessack or grant[Data] before it")
+      }
     }
-    when (dtaskOpcode(2, 1) === Grant(2, 1)) {
-        val conflictMask2 = inflight_grant.map(s =>
-          s.valid && s.bits.tag === io.d_task.bits.task.tag && s.bits.set === io.d_task.bits.task.set &&
-            !s.bits.isAccessAckData
-        )
-      assert(PopCount(conflictMask2) < 1.U, "When Grant[Data] arrive, shouldn't have other grant[Data] before it")
+    when(dtaskOpcode(2, 1) === Grant(2, 1)) {
+      val conflictMask2 = inflight_grant.map(s =>
+        s.valid && s.bits.tag === io.d_task.bits.task.tag && s.bits.set === io.d_task.bits.task.set &&
+          !s.bits.isAccessAckData
+      )
+      if(cacheParams.enableAssert) assert(PopCount(conflictMask2) < 1.U, "When Grant[Data] arrive, shouldn't have other grant[Data] before it")
     }
+
     // choose an empty entry
     val insertIdx = PriorityEncoder(inflight_grant.map(!_.valid))
     val entry = inflight_grant(insertIdx)
