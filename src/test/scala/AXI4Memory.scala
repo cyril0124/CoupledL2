@@ -223,6 +223,11 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   val addressMem = Mem(numOutstanding, UInt(in.ar.bits.addr.getWidth.W))
   val arlenMem = Mem(numOutstanding, UInt(in.ar.bits.len.getWidth.W))
 
+  println(s"[AXI4Memory] ramWidth: ${ramWidth}")
+  println(s"[AXI4Memory] ramSplit: ${ramSplit}")
+  println(s"[AXI4Memory] ramBaseAddr: ${ramBaseAddr}")
+  println(s"[AXI4Memory] ramOffsetBits: ${ramOffsetBits}")
+
   // accept a read request and send it to the external model
   val pending_read_req_valid = RegInit(false.B)
   val pending_read_req_bits  = RegEnable(in.ar.bits, in.ar.fire)

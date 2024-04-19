@@ -246,10 +246,11 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
     val L3OuterBusWidth = 256
     val memAddrMask = (1L << PAddrBits) - 1L
     val memRange = AddressSet(0x00000000L, memAddrMask).subtract(AddressSet(0x00000000L, 0x7FFFFFFFL))
+    val memMax = memAddrMask
 
     val ram = LazyModule(new AXI4Memory(
       address = memRange, 
-      memByte = 128L * 1024 * 1024 * 1024, 
+      memByte = memAddrMask, 
       useBlackBox = true, 
       executable = true,
       beatBytes = L3OuterBusWidth / 8,
