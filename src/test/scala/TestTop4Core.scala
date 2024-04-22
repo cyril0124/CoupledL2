@@ -29,15 +29,15 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
   val l2Set = 256
   val l2Way = 8
 
-  val l3Set = 2048
+  val l3Set = 1024
   val l3Way = 8
 
-  val L2NBanks = 2
-  val L3NBanks = 4
+  val L2NBanks = 1
+  val L3NBanks = 1
   val L2BlockSize = 64
   val L3BlockSize = 64
 
-  val openL2Pf = false
+  val openL2Pf = true
   val l2Pf = if(openL2Pf) Some(coupledL2.prefetch.PrefetchReceiverParams()) else None
 
   def createDCacheNode(name: String, sources: Int) = {
@@ -106,7 +106,7 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
         name = s"l2$i",
         ways = l2Way,
         sets = l2Set,
-        clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
+        clientCaches = Seq(L1Param(aliasBitsOpt = Some(1))),
         echoField = Seq(huancun.DirtyField()),
         prefetch = l2Pf,
         enablePerf = false,
@@ -142,7 +142,7 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
       ways = l3Way,
       sets = l3Set,
       inclusive = false,
-      clientCaches = Seq(CacheParameters(sets = 2 * clientDirBytes / L2NBanks / l2Way / 64, ways = l2Way + 2, blockGranularity = log2Ceil(32), name = "L2")), 
+      clientCaches = Seq(CacheParameters(sets = l2Set * NumCores, ways = l2Way + 2, blockGranularity = log2Ceil(32), name = "L2")), 
       sramClkDivBy2 = true,
       sramDepthDiv = 8,
       dataBytes = 8,
@@ -199,15 +199,15 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
     case(source, sink) => sink := source
   }
 
-  val idBits = 13
-  val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
-    Seq(AXI4MasterParameters(
-      name = "dma",
-      id = IdRange(0, 1 << idBits),
-      maxFlight = Some(16)
-    ))
-  )))
-  l2xbar := TLBuffer() := AXI2TL(16, 16) := AXI2TLFragmenter() := l3FrontendAXI4Node
+  // val idBits = 13
+  // val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+  //   Seq(AXI4MasterParameters(
+  //     name = "dma",
+  //     id = IdRange(0, 1 << idBits),
+  //     maxFlight = Some(16)
+  //   ))
+  // )))
+  // l2xbar := TLBuffer() := AXI2TL(16, 16) := AXI2TLFragmenter() := l3FrontendAXI4Node
 
   // has DRAMsim3 (TLRAM)
   // ram.node :=
@@ -275,7 +275,7 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
       case (node, i) =>
         node.makeIOs()(ValName(s"master_port_$i"))
     }
-    l3FrontendAXI4Node.makeIOs()(ValName("dma_port"))
+    // l3FrontendAXI4Node.makeIOs()(ValName("dma_port"))
     ctrl_node.makeIOs()(ValName("cmo_port"))
     l3_ecc_int_sink.makeIOs()(ValName("l3_int_port"))
 
