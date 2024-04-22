@@ -23,6 +23,7 @@ class TestTop_fullSys_1Core()(implicit p: Parameters) extends LazyModule {
   val delayFactor = 0.2
   val cacheParams = p(L2ParamKey)
 
+  val hasPTW = true
   val NumCores = 1
   val nrL2 = NumCores
 
@@ -73,6 +74,7 @@ class TestTop_fullSys_1Core()(implicit p: Parameters) extends LazyModule {
   }
 
   var master_nodes: Seq[TLClientNode] = Seq()
+  var ptw_nodes: Seq[TLClientNode] = Seq()
   var l1xbars: Seq[TLNode] = Seq()
   val l2xbar: TLNode = TLXbar()
 
@@ -87,12 +89,17 @@ class TestTop_fullSys_1Core()(implicit p: Parameters) extends LazyModule {
     val icache_idMax = 16
     val l1d = createDCacheNode(s"l1d$i", dcache_idMax)
     val l1i = createICacheNode(s"l1i$i", icache_idMax)
+    val ptw = createICacheNode(s"ptw$i", icache_idMax)
     master_nodes = master_nodes ++ Seq(l1d, l1i)
+    ptw_nodes = ptw_nodes ++ Seq(ptw)
 
     val xbar = TLXbar()
     l1xbars = l1xbars ++ Seq(xbar)
     xbar := TLBuffer() := l1i
     xbar := TLBuffer() := l1d
+    if (hasPTW) {
+      xbar := TLBuffer() := ptw
+    }
   }
 
   // Create L2 nodes
@@ -148,9 +155,9 @@ class TestTop_fullSys_1Core()(implicit p: Parameters) extends LazyModule {
       prefetchRecv = None, // Some(huancun.prefetch.PrefetchReceiverParams()), // None, //Some(huancun.prefetch.PrefetchReceiverParams()),
       tagECC = Some("secded"),
       dataECC = Some("secded"),
-      // ctrl = Some(huancun.CacheCtrl(
-      //   address = 0x3900_0000
-      // ))
+      ctrl = Some(huancun.CacheCtrl(
+        address = 0x3900_0000
+      ))
     )
     case DebugOptionsKey => DebugOptions()
   })))
@@ -174,20 +181,20 @@ class TestTop_fullSys_1Core()(implicit p: Parameters) extends LazyModule {
   //     l3.pf_l3recv_node.map(l3_recv =>  l3_recv:= l3pf_RecvXbar.outNode.head)
   //   case None =>
   // }
-  // val ctrl_node = TLClientNode(Seq(TLMasterPortParameters.v2(
-  //     Seq(TLMasterParameters.v1(
-  //       name = "ctrl",
-  //       sourceId = IdRange(0, 16),
-  //       supportsProbe = TransferSizes.none
-  //     )),
-  //     channelBytes = TLChannelBeatBytes(8), // 64bits
-  //     minLatency = 1,
-  //     echoFields = Nil,
-  //   )))
+   val ctrl_node = TLClientNode(Seq(TLMasterPortParameters.v2(
+       Seq(TLMasterParameters.v1(
+         name = "ctrl",
+         sourceId = IdRange(0, 16),
+         supportsProbe = TransferSizes.none
+       )),
+       channelBytes = TLChannelBeatBytes(8), // 64bits
+       minLatency = 1,
+       echoFields = Nil,
+     )))
   
-//  val l3_ecc_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
-//   l3.ctlnode.foreach(_ := TLBuffer() := ctrl_node)
-//    l3.intnode.foreach(l3_ecc_int_sink := _)
+  val l3_ecc_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
+  l3.ctlnode.foreach(_ := TLBuffer() := ctrl_node)
+  l3.intnode.foreach(l3_ecc_int_sink := _)
 
   val l2_ecc_int_sinks = Seq.fill(nrL2)(IntSinkNode(IntSinkPortSimple(1, 1)))
   l2List.map(_.intNode).zip(l2_ecc_int_sinks).foreach{ 
@@ -250,9 +257,13 @@ class TestTop_fullSys_1Core()(implicit p: Parameters) extends LazyModule {
       case (node, i) =>
         node.makeIOs()(ValName(s"master_port_$i"))
     }
+    ptw_nodes.zipWithIndex.foreach {
+      case (node, i) =>
+        node.makeIOs()(ValName(s"ptw_port_$i"))
+    }
     // l3FrontendAXI4Node.makeIOs()(ValName("dma_port"))
-    // ctrl_node.makeIOs()(ValName("cmo_port"))
-//    l3_ecc_int_sink.makeIOs()(ValName("l3_int_port"))
+    ctrl_node.makeIOs()(ValName("cmo_port"))
+    l3_ecc_int_sink.makeIOs()(ValName("l3_int_port"))
 
     l2_ecc_int_sinks.zipWithIndex.foreach{ case(sink, i) => sink.makeIOs()(ValName("l2_int_port_"+i))}
 

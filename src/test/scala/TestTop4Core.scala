@@ -23,6 +23,7 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
   val delayFactor = 0.2
   val cacheParams = p(L2ParamKey)
 
+  val hasPTW = true
   val NumCores = 4
   val nrL2 = NumCores
 
@@ -73,6 +74,7 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
   }
 
   var master_nodes: Seq[TLClientNode] = Seq()
+  var ptw_nodes: Seq[TLClientNode] = Seq()
   var l1xbars: Seq[TLNode] = Seq()
   val l2xbar: TLNode = TLXbar()
 
@@ -91,12 +93,17 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
     val icache_idMax = 13
     val l1d = createDCacheNode(s"l1d$i", dcache_idMax)
     val l1i = createICacheNode(s"l1i$i", icache_idMax)
+    val ptw = createICacheNode(s"ptw$i", icache_idMax)
     master_nodes = master_nodes ++ Seq(l1d, l1i)
+    ptw_nodes = ptw_nodes ++ Seq(ptw)
 
     val xbar = TLXbar()
     l1xbars = l1xbars ++ Seq(xbar)
     xbar := TLBuffer() := l1i
     xbar := TLBuffer() := l1d
+    if (hasPTW) {
+      xbar := TLBuffer() := ptw
+    }
   }
 
   // Create L2 nodes
@@ -274,6 +281,10 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
     master_nodes.zipWithIndex.foreach {
       case (node, i) =>
         node.makeIOs()(ValName(s"master_port_$i"))
+    }
+    ptw_nodes.zipWithIndex.foreach {
+      case (node, i) =>
+        node.makeIOs()(ValName(s"ptw_port_$i"))
     }
     // l3FrontendAXI4Node.makeIOs()(ValName("dma_port"))
     ctrl_node.makeIOs()(ValName("cmo_port"))
