@@ -95,11 +95,11 @@ class TestTop_fullSys_1Core()(implicit p: Parameters) extends LazyModule {
 
     val xbar = TLXbar()
     l1xbars = l1xbars ++ Seq(xbar)
-    xbar := TLBuffer() := l1i
-    xbar := TLBuffer() := l1d
     if (hasPTW) {
       xbar := TLBuffer() := ptw
     }
+    xbar := TLBuffer() := l1i
+    xbar := TLBuffer() := l1d
   }
 
   // Create L2 nodes
