@@ -53,7 +53,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     }))
 
     /* handle capacity conflict of GrantBuffer */
-    val status_vec_toD = Vec(3, ValidIO(new PipeStatus))
+    val status_vec_toD = Vec(3, ValidIO(new PipeStatus)) //two signals ： valid channel
     /* handle capacity conflict of SourceC */
     val status_vec_toC = Vec(3, ValidIO(new PipeStatus))
 
@@ -65,8 +65,8 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     })
 
     /* get dir result at stage 3 */
-    val dirResp_s3 = Input(new DirResult)
-    val replResp = Flipped(ValidIO(new ReplacerResult))
+    val dirResp_s3 = Input(new DirResult) //dirctory respond
+    val replResp = Flipped(ValidIO(new ReplacerResult)) //replace respond
 
     /* send task to MSHRCtl at stage 3 */
     val toMSHRCtl = new Bundle() {
@@ -125,7 +125,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   })
 
   val resetFinish = RegInit(false.B)
-  val resetIdx = RegInit((cacheParams.sets - 1).U)
+  val resetIdx = RegInit((cacheParams.sets - 1).U) //127
   /* block reqs when reset */
   when(!resetFinish) {
     resetIdx := resetIdx - 1.U
@@ -157,7 +157,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   val meta_s3         = WireInit(dirResult_s3.meta);dontTouch(meta_s3)
   val req_s3          = WireInit(task_s3.bits);dontTouch(req_s3)
 
-  val mshr_req_s3     = req_s3.mshrTask
+  val mshr_req_s3     = req_s3.mshrTask /*任务是否来自mshr*/
   val sink_req_s3     = !mshr_req_s3
   val sinkA_req_s3    = !mshr_req_s3 && req_s3.fromA
   val sinkB_req_s3    = !mshr_req_s3 && req_s3.fromB
@@ -255,6 +255,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
 
   sink_resp_s3.valid := task_s3.valid && !mshr_req_s3 && !need_mshr_s3
   sink_resp_s3.bits := task_s3.bits
+  /*question*/
   sink_resp_s3.bits.mshrId := (1 << (mshrBits-1)).U + sink_resp_s3.bits.sourceId // extra id for reqs that do not enter mshr
 
   when(req_s3.fromA) {
@@ -305,7 +306,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   val need_data_b  = sinkB_req_s3 && dirResult_s3.hit &&
                        (meta_s3.state === TRUNK || meta_s3.state === TIP && meta_s3.dirty || req_s3.needProbeAckData)
   val need_data_mshr_repl = mshr_refill_s3 && need_repl && !retry
-  val ren                 = need_data_a || need_data_b || need_data_mshr_repl
+  val ren                 = need_data_a || need_data_b || need_data_mshr_repl  //DS read write enable
 
   val wen_c = sinkC_req_s3 && isParamFromT(req_s3.param) && req_s3.opcode(0) && dirResult_s3.hit
   val wen_mshr = req_s3.dsWen && (
@@ -337,7 +338,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   // A: need_write_releaseBuf indicates that DS should be read and the data will be written into ReleaseBuffer
   //    need_write_releaseBuf is assigned true when:
   //    inner clients' data is needed, but whether the client will ack data is uncertain, so DS data is also needed, or
-  val need_write_releaseBuf = need_probe_s3_a ||
+  val need_write_releaseBuf = need_probe_s3_a ||  // releasebuffer ：暂存上游或者下层的release的数据
     cache_alias ||
     need_data_b && need_mshr_s3_b ||
     need_data_mshr_repl
@@ -345,7 +346,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   //    L2 sends AcquirePerm to L3, so GrantData to L1 needs to read DS ahead of time and store in RefillBuffer
   // TODO: how about AcquirePerm BtoT interaction with refill buffer?
   // !!TODO June 22th: this is no longer useful, cuz we only AcquirePerm when L1 AcquirePerm (see MSHR)
-  val need_write_refillBuf = sinkA_req_s3 && req_needT_s3 && dirResult_s3.hit && meta_s3.state === BRANCH && !req_prefetch_s3
+  val need_write_refillBuf = sinkA_req_s3 && req_needT_s3 && dirResult_s3.hit && meta_s3.state === BRANCH && !req_prefetch_s3  //refill buffer ：暂存grant的数据
 
   /* ======== Write Directory ======== */
   val metaW_valid_s3_a    = WireInit(sinkA_req_s3 && !need_mshr_s3_a && !req_get_s3) // get & prefetch that hit will not write meta
@@ -368,7 +369,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   val metaW_s3_a_prefetchUpdate = WireInit(meta_s3)
   if(prefetchOpt.isDefined){
     metaW_s3_a_prefetchUpdate.prefetch.get := Mux(metaW_s3_a_prefetchUpdate.pfVec.get =/= PfSource.NONE, true.B, false.B)
-    metaW_s3_a_prefetchUpdate.pfVec.get := Mux(meta_s3.prefetch.get && dirResult_s3.hit, 0.U, task_s3.bits.pfVec.get | meta_s3.pfVec.get)
+    metaW_s3_a_prefetchUpdate.pfVec.get := Mux(meta_s3.prefetch.get && dirResult_s3.hit, 0.U, task_s3.bits.pfVec.get | meta_s3.pfVec.get)  //If it is already prefetched, the value is set to zero
   }
 
   val metaW_s3_a_normal = MetaEntry(
@@ -493,7 +494,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
       XSPerfAccumulate("mp_normal_pf_hit",normal_pf_hit)
     }
   }
-  if(io.prefetchEvict.isDefined){
+  if(io.prefetchEvict.isDefined){  //replace事项
     val evict = io.prefetchEvict.get
     evict.bits.tag := ms_task.tag
     evict.bits.set := ms_task.set

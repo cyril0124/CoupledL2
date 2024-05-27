@@ -137,7 +137,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
   io.tasks.source_b.valid := !state_dups(0).s_pprobe || !state_dups(0).s_rprobe
   val will_mp_release_valid = !state_dups(0).s_release && state_dups(0).w_rprobeacklast && !io.bMergeTask.valid &&
     state_dups(0).w_grantlast &&
-    state_dups(0).w_replResp && // release after Grant to L1 sent and replRead returns
+    state_dups(0).w_replResp && // release after Grant to L1 sent and replReap returns
     state_dups(0).w_release
   val mp_release_valid = RegNext(will_mp_release_valid) && !io.bMergeTask.valid && will_mp_release_valid // add reg because sinkB bMergeTask out add pipe
 
