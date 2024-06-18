@@ -37,20 +37,10 @@ class MMIOBridge()(implicit p: Parameters) extends LazyModule
   /**
     * MMIO node
     */
-  val onChipPeripheralRange = AddressSet(0x38000000L, 0x07ffffffL)
-  val uartRange = AddressSet(0x40600000, 0xf)
-  val uartDevice = new SimpleDevice("serial", Seq("xilinx,uartlite"))
-  val uartParams = TLSlaveParameters.v1(
-    address = Seq(uartRange),
-    resources = uartDevice.reg,
-    regionType = RegionType.UNCACHED,
-    supportsGet = TransferSizes(1, 8),
-    supportsPutFull = TransferSizes(1, 8),
-    supportsPutPartial = TransferSizes(1, 8)
-  )
+  val beuRange = AddressSet(0x38010000, 4096 - 1)
   val peripheralRange = AddressSet(
     0x0, 0x7fffffff
-  ).subtract(onChipPeripheralRange).flatMap(x => x.subtract(uartRange))
+  ).subtract(beuRange)
 
   val mmioNode = TLManagerNode(Seq(TLSlavePortParameters.v1(
     managers = Seq(TLSlaveParameters.v1(
@@ -59,7 +49,7 @@ class MMIOBridge()(implicit p: Parameters) extends LazyModule
       supportsGet = TransferSizes(1, 8),
       supportsPutFull = TransferSizes(1, 8),
       supportsPutPartial = TransferSizes(1, 8)
-    ), uartParams),
+    )),
     beatBytes = 8
   )))
 
@@ -105,6 +95,8 @@ class MMIOBridgeEntry(edge: TLEdgeIn)(implicit p: Parameters) extends TL2CHIL2Mo
   val dbID = Reg(UInt(DBID_WIDTH.W))
   val allowRetry = RegInit(true.B)
   val pCrdType = Reg(UInt(PCRDTYPE_WIDTH.W))
+  val denied = Reg(Bool())
+  val corrupt = Reg(Bool())
   val isRead = req.opcode === Get
 
   val wordBits = io.req.bits.data.getWidth // 64
@@ -127,6 +119,8 @@ class MMIOBridgeEntry(edge: TLEdgeIn)(implicit p: Parameters) extends TL2CHIL2Mo
     s_txreq := false.B
     s_resp := false.B
     allowRetry := true.B
+    denied := false.B
+    corrupt := false.B
     when (io.req.bits.opcode === Get) {
       w_compdata := false.B
       w_readreceipt.foreach(_ := false.B)
@@ -146,6 +140,8 @@ class MMIOBridgeEntry(edge: TLEdgeIn)(implicit p: Parameters) extends TL2CHIL2Mo
   when (rxdat.fire) {
     w_compdata := true.B
     rdata := rxdat.bits.data
+    denied := denied || rxdat.bits.respErr === RespErrEncodings.NDERR
+    corrupt := corrupt || rxdat.bits.respErr === RespErrEncodings.DERR
   }
   when (io.resp.fire) {
     s_resp := true.B
@@ -158,6 +154,10 @@ class MMIOBridgeEntry(edge: TLEdgeIn)(implicit p: Parameters) extends TL2CHIL2Mo
       w_dbidresp := true.B
       srcID := rxrsp.bits.srcID
       dbID := rxrsp.bits.dbID
+    }
+    when (rxrsp.bits.opcode === RSPOpcodes.CompDBIDResp || rxrsp.bits.opcode === RSPOpcodes.Comp) {
+      denied := denied || rxrsp.bits.respErr === RespErrEncodings.NDERR
+      // TODO: d_corrupt is reserved and must be 0 in TileLink
     }
     when (rxrsp.bits.opcode === RSPOpcodes.RetryAck) {
       s_txreq := false.B
@@ -203,8 +203,8 @@ class MMIOBridgeEntry(edge: TLEdgeIn)(implicit p: Parameters) extends TL2CHIL2Mo
   io.resp.bits.size := req.size
   io.resp.bits.source := req.source
   io.resp.bits.sink := 0.U // ignored
-  io.resp.bits.denied := false.B
-  io.resp.bits.corrupt := false.B
+  io.resp.bits.denied := denied
+  io.resp.bits.corrupt := isRead && corrupt
   io.resp.bits.data := ParallelLookUp(
     reqWordIdx,
     List.tabulate(words)(i => i.U -> rdata((i + 1) * wordBits - 1, i * wordBits))
@@ -215,7 +215,7 @@ class MMIOBridgeEntry(edge: TLEdgeIn)(implicit p: Parameters) extends TL2CHIL2Mo
   txdat.bits.tgtID := srcID
   txdat.bits.txnID := dbID
   txdat.bits.opcode := DATOpcodes.NonCopyBackWrData
-  txdat.bits.ccID := Cat(req.address(log2Ceil(beatBytes)), 0.U(1.W))
+  txdat.bits.ccID := req.address(log2Ceil(beatBytes), log2Ceil(beatBytes) - CCID_WIDTH + 1)
   txdat.bits.dataID := Cat(req.address(log2Ceil(beatBytes)), 0.U(1.W))
   txdat.bits.be := ParallelLookUp(
     reqWordIdx,

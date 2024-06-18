@@ -30,7 +30,7 @@ trait PrefetchParameters {
 }
 
 trait HasPrefetchParameters extends HasCoupledL2Parameters {
-  val inflightEntries = prefetchOpt.get.inflightEntries
+  val inflightEntries = if(prefetchers.nonEmpty) prefetchers.map(_.inflightEntries).max else 0
 }
 
 abstract class PrefetchBundle(implicit val p: Parameters) extends Bundle with HasPrefetchParameters

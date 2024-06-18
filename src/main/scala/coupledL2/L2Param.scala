@@ -62,7 +62,7 @@ case class L2Param(
   pageBytes: Int = 4096,
   channelBytes: TLChannelBeatBytes = TLChannelBeatBytes(32),
   clientCaches: Seq[L1Param] = Nil,
-  replacement: String = "plru",
+  replacement: String = "drrip",
   mshrs: Int = 16,
   releaseData: Int = 3,
   /* 0 for dirty alone
@@ -91,7 +91,7 @@ case class L2Param(
 
   hartId: Int = 0,
   // Prefetch
-  prefetch: Option[PrefetchParameters] = None,
+  prefetch: Seq[PrefetchParameters] = Nil,
   // Performance analysis
   enablePerf: Boolean = true,
   // RollingDB
@@ -106,7 +106,7 @@ case class L2Param(
   FPGAPlatform: Boolean = false,
 
   // Network layer SAM
-  sam: Seq[(AddressSet, Int)] = Seq(AddressSet.everything -> 33)
+  sam: Seq[(AddressSet, Int)] = Seq(AddressSet.everything -> 0)
 ) {
   def toCacheParams: CacheParameters = CacheParameters(
     name = name,

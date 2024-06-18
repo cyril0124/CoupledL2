@@ -38,25 +38,28 @@ case class TPParameters(
     replacementPolicy: String = "random",
     debug: Boolean = false
 ) extends PrefetchParameters {
-  override val hasPrefetchBit:  Boolean = true
-  override val hasPrefetchSrc:  Boolean = true
+  override val hasPrefetchBit: Boolean = true
+  override val hasPrefetchSrc: Boolean = true
   override val inflightEntries: Int = 16
 }
 
 trait HasTPParams extends HasCoupledL2Parameters {
-  val tpParams = prefetchOpt.get.asInstanceOf[TPParameters]
-  val tpTableAssoc = tpParams.tpTableAssoc
-  val tpTableNrSet = tpParams.tpTableEntries / tpTableAssoc
-  val tpTableSetBits = log2Ceil(tpTableNrSet)
-  val tpEntryMaxLen = tpParams.inflightEntries
-  val tpTableReplacementPolicy = tpParams.replacementPolicy
-  val debug = tpParams.debug
-  val vaddrBits = tpParams.vaddrBits
-  val blockOffBits = tpParams.blockOffBits
-  val dataReadQueueDepth = tpParams.dataReadQueueDepth
-  val dataWriteQueueDepth = tpParams.dataWriteQueueDepth
-  val tpDataQueueDepth = tpParams.tpDataQueueDepth
-  val triggerQueueDepth = tpParams.triggerQueueDepth
+  def tpParams = prefetchers.find {
+    case p: TPParameters => true
+    case _ => false
+  }.get.asInstanceOf[TPParameters]
+  def tpTableAssoc = tpParams.tpTableAssoc
+  def tpTableNrSet = tpParams.tpTableEntries / tpTableAssoc
+  def tpTableSetBits = log2Ceil(tpTableNrSet)
+  def tpEntryMaxLen = tpParams.inflightEntries
+  def tpTableReplacementPolicy = tpParams.replacementPolicy
+  def debug = tpParams.debug
+  def vaddrBits = tpParams.vaddrBits
+  def blockOffBits = tpParams.blockOffBits
+  def dataReadQueueDepth = tpParams.dataReadQueueDepth
+  def dataWriteQueueDepth = tpParams.dataWriteQueueDepth
+  def tpDataQueueDepth = tpParams.tpDataQueueDepth
+  def triggerQueueDepth = tpParams.triggerQueueDepth
 //  val tpThrottleCycles = tpParams.throttleCycles
 //  require(tpThrottleCycles > 0, "tpThrottleCycles must be greater than 0")
 }

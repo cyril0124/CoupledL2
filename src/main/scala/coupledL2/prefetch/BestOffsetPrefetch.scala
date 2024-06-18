@@ -17,7 +17,7 @@
 
 package coupledL2.prefetch
 
-import utility.{ChiselDB, Constantin, MemReqSource, ParallelPriorityMux, RRArbiterInit, SRAMTemplate}
+import utility.{GatedValidRegNext, ChiselDB, Constantin, MemReqSource, ParallelPriorityMux, RRArbiterInit, SRAMTemplate}
 import org.chipsalliance.cde.config.Parameters
 import chisel3.DontCare.:=
 import chisel3._
@@ -52,7 +52,8 @@ case class BOPParameters(
     90, 96, 100, 108, 120, 125, 128, 135,
     144, 150, 160, 162, 180, 192, 200, 216,
     225, 240, 243, 250/*, 256*/
-  ))
+  )
+  )
     extends PrefetchParameters {
   override val hasPrefetchBit:  Boolean = true
   override val hasPrefetchSrc:  Boolean = true
@@ -60,36 +61,39 @@ case class BOPParameters(
 }
 
 trait HasBOPParams extends HasPrefetcherHelper {
-  val bopParams = prefetchOpt.get.asInstanceOf[BOPParameters]
+  def bopParams = prefetchers.find {
+      case p: BOPParameters => true
+      case _ => false
+    }.get.asInstanceOf[BOPParameters]
 
   // train address space: virtual or physical
-  val virtualTrain = bopParams.virtualTrain
-  val fullAddrBits = if(virtualTrain) fullVAddrBits else fullAddressBits
-  val noOffsetAddrBits = fullAddrBits - offsetBits
+  def virtualTrain = bopParams.virtualTrain
+  def fullAddrBits = if(virtualTrain) fullVAddrBits else fullAddressBits
+  def noOffsetAddrBits = fullAddrBits - offsetBits
   override val REQ_FILTER_SIZE = 16
 
   // Best offset
-  val defaultMinAddrBits = offsetBits + log2Up(bopParams.rrTableEntries) + bopParams.rrTagBits
-  val defaultConfig = fullAddrBits >= defaultMinAddrBits
+  def defaultMinAddrBits = offsetBits + log2Up(bopParams.rrTableEntries) + bopParams.rrTagBits
+  def defaultConfig = fullAddrBits >= defaultMinAddrBits
 
-  val rrTableEntries = if (defaultConfig) bopParams.rrTableEntries else 2
-  val rrIdxBits = log2Up(rrTableEntries)
-  val rrTagBits = if (defaultConfig) bopParams.rrTagBits else (fullAddrBits - offsetBits - rrIdxBits)
-  val scoreBits = bopParams.scoreBits
-  val roundMax = bopParams.roundMax
-  val badScore = bopParams.badScore
-  val initScore = bopParams.badScore + 1
-  val offsetList = bopParams.offsetList
-  val inflightEntries = bopParams.inflightEntries
-  val dQEntries = bopParams.dQEntries
-  val dQLatency = bopParams.dQLatency
-  val dQMaxLatency = bopParams.dQMaxLatency
+  def rrTableEntries = if (defaultConfig) bopParams.rrTableEntries else 2
+  def rrIdxBits = log2Up(rrTableEntries)
+  def rrTagBits = if (defaultConfig) bopParams.rrTagBits else (fullAddrBits - offsetBits - rrIdxBits)
+  def scoreBits = bopParams.scoreBits
+  def roundMax = bopParams.roundMax
+  def badScore = bopParams.badScore
+  def initScore = bopParams.badScore + 1
+  def offsetList = bopParams.offsetList
+  def inflightEntries = bopParams.inflightEntries
+  def dQEntries = bopParams.dQEntries
+  def dQLatency = bopParams.dQLatency
+  def dQMaxLatency = bopParams.dQMaxLatency
 
-  val scores = offsetList.length
-  val offsetWidth = log2Up(offsetList.max) + 2 // -32 <= offset <= 31
-  val roundBits = log2Up(roundMax)
-  val scoreMax = (1 << scoreBits) - 1
-  val scoreTableIdxBits = log2Up(scores)
+  def scores = offsetList.length
+  def offsetWidth = log2Up(offsetList.max) + 2 // -32 <= offset <= 31
+  def roundBits = log2Up(roundMax)
+  def scoreMax = (1 << scoreBits) - 1
+  def scoreTableIdxBits = log2Up(scores)
   // val prefetchIdWidth = log2Up(inflightEntries)
 
   def signedExtend(x: UInt, width: Int): UInt = {
@@ -173,13 +177,13 @@ class RecentRequestTable(implicit p: Parameters) extends BOPModule {
   rrTable.io.r.req.bits.setIdx := idx(rAddr)
   rData := rrTable.io.r.resp.data(0)
 
-  assert(!RegNext(io.w.fire && io.r.req.fire), "single port SRAM should not read and write at the same time")
+  assert(!GatedValidRegNext(io.w.fire && io.r.req.fire), "single port SRAM should not read and write at the same time")
 
   io.w.ready := rrTable.io.w.req.ready && !io.r.req.valid
   io.r.req.ready := true.B
-  io.r.resp.valid := RegNext(rrTable.io.r.req.fire, false.B)
-  io.r.resp.bits.ptr := RegNext(io.r.req.bits.ptr)
-  io.r.resp.bits.hit := rData.valid && rData.tag === RegNext(tag(rAddr))
+  io.r.resp.valid := GatedValidRegNext(rrTable.io.r.req.fire, false.B)
+  io.r.resp.bits.ptr := RegEnable(io.r.req.bits.ptr, rrTable.io.r.req.fire)
+  io.r.resp.bits.hit := rData.valid && rData.tag === RegEnable(tag(rAddr), rrTable.io.r.req.fire)
 
 }
 
