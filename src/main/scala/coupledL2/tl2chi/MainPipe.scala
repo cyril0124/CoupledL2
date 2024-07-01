@@ -361,6 +361,17 @@ class MainPipe(implicit p: Parameters) extends TL2CHIL2Module {
   source_req_s3 := Mux(sink_resp_s3.valid, sink_resp_s3.bits, req_s3)
   source_req_s3.isKeyword.foreach(_ := req_s3.isKeyword.getOrElse(false.B))
 
+  def restoreFullAddr(bank: UInt, set: UInt, tag: UInt) = {
+    (bank << offsetBits).asUInt + (set << (bankBits + offsetBits)).asUInt + (tag << (setBits + bankBits + offsetBits)).asUInt
+  }
+
+  val debug_addr_s3_vec = WireInit(VecInit(Seq.fill(1 << bankBits)(0.U(fullAddressBits.W))))
+  debug_addr_s3_vec.zipWithIndex.foreach {
+    case (addr, i) =>
+      addr := restoreFullAddr(i.asUInt, task_s3.bits.set, task_s3.bits.tag)
+  }
+  dontTouch(debug_addr_s3_vec)
+
   /* ======== Interact with DS ======== */
   val data_s3 = Mux(io.releaseBufResp_s3.valid, io.releaseBufResp_s3.bits.data, io.refillBufResp_s3.bits.data)
   val c_releaseData_s3 = io.bufResp.data.asUInt

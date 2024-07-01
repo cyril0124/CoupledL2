@@ -28,7 +28,8 @@ class ChannelIO[+T <: Data](gen: T) extends Bundle {
   // Flit Valid. The transmitter sets the signal HIGH to indicate when FLIT[(W-1):0] is valid.
   val flitv = Output(Bool())
   // Flit.
-  val flit = Output(UInt(gen.getWidth.W))
+//  val flit = Output(UInt(gen.getWidth.W))
+  val flit = Output(gen)
   // L-Credit Valid. The receiver sets this signal HIGH to return a channel L-Credit to a transmitter.
   val lcrdv = Input(Bool())
 }
@@ -162,11 +163,12 @@ class LCredit2Decoupled[T <: Bundle](
 
   queue.io.enq.valid := accept
   // queue.io.enq.bits := io.in.bits
-  var lsb = 0
-  queue.io.enq.bits.getElements.reverse.foreach { case e =>
-    e := io.in.flit(lsb + e.asUInt.getWidth - 1, lsb).asTypeOf(e.cloneType)
-    lsb += e.asUInt.getWidth
-  }
+  // var lsb = 0
+  // queue.io.enq.bits.getElements.reverse.foreach { case e =>
+  //   e := io.in.flit(lsb + e.asUInt.getWidth - 1, lsb).asTypeOf(e.cloneType)
+  //   lsb += e.asUInt.getWidth
+  // }
+  queue.io.enq.bits := io.in.flit
 
   assert(!accept || queue.io.enq.ready)
 
@@ -186,7 +188,7 @@ class LCredit2Decoupled[T <: Bundle](
 }
 
 object LCredit2Decoupled {
-  val defaultLCreditNum = 4
+  val defaultLCreditNum = 3
 
   def apply[T <: Bundle](
     left: ChannelIO[T],
@@ -237,12 +239,20 @@ class Decoupled2LCredit[T <: Bundle](gen: T) extends Module {
 
   io.in.ready := lcreditPool =/= 0.U && !disableFlit
   io.out.flitpend := true.B
-  io.out.flitv := io.in.fire || returnLCreditValid
-  io.out.flit := Mux(
-    io.in.valid,
-    Cat(io.in.bits.getElements.map(_.asUInt)),
-    0.U // LCrdReturn
-  )
+  io.out.flitv := io.in.fire() || returnLCreditValid
+//  io.out.flit := Mux(
+//    io.in.valid,
+//    Cat(io.in.bits.getElements.map(_.asUInt)),
+//    0.U // LCrdReturn
+//  )
+  when(io.in.valid) {
+    io.out.flit := io.in.bits
+  }.otherwise {
+    io.out.flit.elements.foreach {
+      case (name, data) =>
+        data := DontCare
+    }
+  }
 }
 
 object Decoupled2LCredit {

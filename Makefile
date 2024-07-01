@@ -20,6 +20,9 @@ test-top-l2l3l2:
 test-top-fullsys:
 	mill -i CoupledL2.test.runMain coupledL2.TestTop_fullSys -td build
 
+test-top-chi-onecore-1ul:
+	mill -i CoupledL2.test.runMain coupledL2.TestTop_CHI_OneCore_1UL -td build
+
 test-top-chi-dualcore-0ul:
 	mill -i CoupledL2.test.runMain coupledL2.TestTop_CHI_DualCore_0UL -td build
 

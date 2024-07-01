@@ -183,6 +183,15 @@ object TestTopCHIHelper {
   }
 }
 
+object TestTop_CHI_OneCore_1UL extends App {
+
+  TestTopCHIHelper.gen(p => new TestTop_CHIL2(
+    numCores = 1,
+    numULAgents = 1,
+    banks = 1)(p)
+  )(args)
+}
+
 
 object TestTop_CHI_DualCore_0UL extends App {
 
