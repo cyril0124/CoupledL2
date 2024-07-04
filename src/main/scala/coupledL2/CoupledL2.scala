@@ -33,6 +33,8 @@ import xs.utils.perf.{DebugOptionsKey, HasPerfLogging}
 import xs.utils.sram.SRAMTemplate
 import coupledL2.utils.HasPerfEvents
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
+import xs.utils.dft.{BAP, HasIjtag, SIB}
+import xs.utils.mbist.controller.MbistController
 
 trait HasCoupledL2Parameters {
   val p: Parameters
@@ -252,7 +254,8 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
   val intNode = IntSourceNode(IntSourcePortSimple(resources = device.int))
 
   lazy val module = new Impl
-  class Impl extends LazyModuleImp(this) with HasPerfLogging with HasPerfEvents{
+  class Impl extends LazyModuleImp(this) with HasPerfLogging with HasPerfEvents with HasIjtag {
+    val mName = "CoupledL2"
     val banks = node.in.size
     val bankBits = if (banks == 1) 0 else log2Up(banks)
     val io = IO(new Bundle {
@@ -459,22 +462,22 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
       dontTouch(dft.get)
     }
 
-    private val l2MbistIntf = if (cacheParams.hasMbist && cacheParams.hasShareBus) {
+    if (cacheParams.hasMbist && cacheParams.hasShareBus) {
       val params = mbistPl.get.nodeParams
-      val intf = Some(Module(new MBISTInterface(
+      val intf = Module(new MBISTInterface(
         params = Seq(params),
         ids = Seq(mbistPl.get.childrenIds),
         name = s"MBIST_intf_l2",
         pipelineNum = 1
-      )))
-      intf.get.toPipeline.head <> mbistPl.get.mbist
-      if (cacheParams.hartIds.head == 0) mbistPl.get.genCSV(intf.get.info, "MBIST_L2")
-      intf.get.mbist := DontCare
-      dontTouch(intf.get.mbist)
-      //TODO: add mbist controller connections here
-      intf
-    } else {
-      None
+      ))
+      intf.toPipeline.head <> mbistPl.get.mbist
+      val mbistCtrl = Module(new MbistController(mbistPl.get.myNode))
+      val bap = Module(new BAP(intf.info))
+      val sib = Module(new SIB)
+      intf.mbist <> mbistCtrl.io.mbist
+      mbistCtrl.io.bap <> bap.mbist
+      makeChain(Seq(ijtag, sib.ijtag))
+      makeChain(Seq(sib.host, bap.ijtag))
     }
 
     val topDown = topDownOpt.map(_ => Module(new TopDownMonitor()(p.alterPartial {
