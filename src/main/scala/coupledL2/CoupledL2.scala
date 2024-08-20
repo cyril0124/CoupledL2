@@ -257,6 +257,11 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
     val bankBits = if (banks == 1) 0 else log2Up(banks)
     val io = IO(new Bundle {
       val dfx_reset = Input(new DFTResetSignals())
+      val debugTopDown = new Bundle {
+        // val robTrueCommit = Input(UInt(64.W))
+        val robHeadPaddr = Flipped(Valid(UInt(36.W)))
+        val l2MissMatch = Output(Bool())
+      }
     })
 
     // Display info
@@ -482,14 +487,18 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
       case EdgeOutKey => node.out.head._2
       case BankBitsKey => bankBits
     })))
-    topDownOpt.foreach {
-      _ => {
+    topDownOpt match {
+      case Some(x) => {
         topDown.get.io.msStatus.zip(slices).foreach {
           case (in, s) => in := s.io.msStatus.get
         }
         topDown.get.io.dirResult.zip(slices).foreach {
           case (res, s) => res := s.io.dirResult.get
         }
+        topDown.get.io.debugTopDown <> io.debugTopDown
+      }
+      case None =>{
+        io.debugTopDown.l2MissMatch := false.B
       }
     }
 

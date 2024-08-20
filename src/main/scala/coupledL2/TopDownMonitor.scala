@@ -11,6 +11,11 @@ class TopDownMonitor()(implicit p: Parameters) extends L2Module with HasPerfLogg
   val io = IO(new Bundle() {
     val dirResult = Vec(banks, Flipped(ValidIO(new DirResult)))
     val msStatus  = Vec(banks, Vec(mshrsAll, Flipped(ValidIO(new MSHRStatus))))
+    val debugTopDown = new Bundle {
+      // val robTrueCommit = Input(UInt(64.W))
+      val robHeadPaddr = Flipped(Valid(UInt(36.W)))
+      val l2MissMatch = Output(Bool())
+    }
   })
 
   /* ====== PART ONE ======
@@ -31,10 +36,11 @@ class TopDownMonitor()(implicit p: Parameters) extends L2Module with HasPerfLogg
             val pBlockAddr  = (pAddr.bits >> 6.U).asUInt
 
             val isMiss   = ms.valid && ms.bits.is_miss
-            pAddr.valid && msBlockAddr === pBlockAddr && isMiss
+            // pAddr.valid && msBlockAddr === pBlockAddr && isMiss
+            io.debugTopDown.robHeadPaddr.valid && (msBlockAddr === pBlockAddr) && isMiss
         }
     }
-
+    io.debugTopDown.l2MissMatch := Cat(addrMatchVec.flatten).orR
     val addrMatch = Cat(addrMatchVec.flatten).orR
 
     XSPerfAccumulate(perfName, addrMatch)
