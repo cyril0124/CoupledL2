@@ -24,7 +24,7 @@ import coupledL2.utils._
 import xs.utils.{ParallelPriorityMux, RegNextN}
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink.TLMessages._
-import xs.utils.mbist.MBISTPipeline
+import xs.utils.mbist.MbistPipeline
 import xs.utils.perf.HasPerfLogging
 import xs.utils.sram.SRAMTemplate
 import chisel3.util.random.LFSR
@@ -144,7 +144,7 @@ class TagWrite(implicit p: Parameters) extends L2Bundle {
   val wtag = UInt(tagBits.W)
 }
 
-class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends L2Module with HasPerfLogging{
+class Directory(implicit p: Parameters) extends L2Module with HasPerfLogging{
 
   val io = IO(new Bundle() {
     val read = Flipped(DecoupledIO(new DirRead))
@@ -185,11 +185,9 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
   val replacerWen = WireInit(false.B)
 
   val tagArray  = Module(new BankedSRAM(UInt(tagBits.W), sets, ways, banks, singlePort = true,
-    hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
-    enableClockGate = enableClockGate, parentName = parentName + "tag_"))
+    hasMbist = cacheParams.hasMbist))
   val metaArray = Module(new SRAMTemplate(new MetaEntryWithoutPfVec, sets, ways, singlePort = true,
-    hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
-    hasClkGate = enableClockGate, parentName = parentName + "meta_"))
+    hasMbist = cacheParams.hasMbist))
 
   val tagRead = Wire(Vec(ways, UInt(tagBits.W)))
   val metaRead = Wire(Vec(ways, new MetaEntryWithoutPfVec()))
@@ -203,13 +201,9 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
   val replacer_sram_opt = if(random_repl) None else
     Some(Module(new SRAMTemplate(UInt(repl.nBits.W), sets, 1,
       singlePort = true, shouldReset = true,
-      hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
-      hasClkGate = enableClockGate, parentName = parentName + "repl_")))
+      hasMbist = cacheParams.hasMbist)))
 
-  val mbistPl = MBISTPipeline.PlaceMbistPipeline(1,
-    s"${parentName}_mbistPipe",
-    cacheParams.hasMbist && cacheParams.hasShareBus
-  )
+  val mbistPl = MbistPipeline.PlaceMbistPipeline(1, place = cacheParams.hasMbist)
 
   /* ====== Generate response signals ====== */
   // hit/way calculation in stage 3, Cuz SRAM latency is high under high frequency

@@ -108,7 +108,6 @@ case class L2Param
     e = BufferParams.default
   ),
   hasMbist: Boolean = false,
-  hasShareBus: Boolean = false,
 
   // Numbers of Performance Counter in <xxx submodule>
   numPCntMP: Int = 11,

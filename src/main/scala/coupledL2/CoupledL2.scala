@@ -28,9 +28,9 @@ import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.util._
 import org.chipsalliance.cde.config.Parameters
 import coupledL2.prefetch._
-import xs.utils.mbist.{MBISTInterface, MBISTPipeline}
+import xs.utils.mbist.{MbistInterface, MbistPipeline}
 import xs.utils.perf.{DebugOptionsKey, HasPerfLogging}
-import xs.utils.sram.SRAMTemplate
+import xs.utils.sram.{SRAMTemplate, SramHelper}
 import coupledL2.utils.HasPerfEvents
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 
@@ -367,7 +367,7 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
     val slices = node.in.zip(node.out).zipWithIndex.map {
       case (((in, edgeIn), (out, edgeOut)), i) =>
         require(in.params.dataBits == out.params.dataBits)
-        val slice = Module(new Slice(parentName = parentName + s"slice${i}_")(p.alterPartial {
+        val slice = Module(new Slice()(p.alterPartial {
           case EdgeInKey  => edgeIn
           case EdgeOutKey => edgeOut
           case BankBitsKey => bankBits
@@ -452,28 +452,25 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
     intNode.out.foreach(int => int._1.foreach(_ := hasECCError))
     intNode.out.foreach(i => dontTouch(i._1))
 
-    private val mbistPl = MBISTPipeline.PlaceMbistPipeline(Int.MaxValue,
-      s"${parentName}_mbistPipe",
-      cacheParams.hasMbist && cacheParams.hasShareBus
-    )
+    private val mbistPl = MbistPipeline.PlaceMbistPipeline(Int.MaxValue, place = cacheParams.hasMbist)
 
-    private val sigFromSrams = if (cacheParams.hasMbist) Some(SRAMTemplate.genBroadCastBundleTop()) else None
+    private val sigFromSrams = if (cacheParams.hasMbist) Some(SramHelper.genBroadCastBundleTop()) else None
     val dft = if (cacheParams.hasMbist) Some(IO(sigFromSrams.get.cloneType)) else None
     if (cacheParams.hasMbist) {
       dft.get <> sigFromSrams.get
       dontTouch(dft.get)
     }
 
-    private val l2MbistIntf = if (cacheParams.hasMbist && cacheParams.hasShareBus) {
+    private val l2MbistIntf = if (cacheParams.hasMbist) {
       val params = mbistPl.get.nodeParams
-      val intf = Some(Module(new MBISTInterface(
+      val intf = Some(Module(new MbistInterface(
         params = Seq(params),
         ids = Seq(mbistPl.get.childrenIds),
         name = s"MBIST_intf_l2",
         pipelineNum = 1
       )))
       intf.get.toPipeline.head <> mbistPl.get.mbist
-      if (cacheParams.hartIds.head == 0) mbistPl.get.genCSV(intf.get.info, "MBIST_L2")
+      if (cacheParams.hartIds.head == 0) mbistPl.get.registerCSV(intf.get.info, "MBIST_L2")
       intf.get.mbist := DontCare
       dontTouch(intf.get.mbist)
       //TODO: add mbist controller connections here

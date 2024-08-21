@@ -27,10 +27,10 @@ import coupledL2.utils._
 import coupledL2.debug._
 import coupledL2.prefetch.PrefetchIO
 import xs.utils.RegNextN
-import xs.utils.mbist.MBISTPipeline
+import xs.utils.mbist.MbistPipeline
 import xs.utils.perf.HasPerfLogging
 
-class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Module with HasPerfLogging with HasPerfEvents{
+class Slice(implicit p: Parameters) extends L2Module with HasPerfLogging with HasPerfEvents{
   val io = IO(new Bundle {
     val in = Flipped(TLBundle(edgeIn.bundle))
     val out = TLBundle(edgeOut.bundle)
@@ -46,21 +46,18 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   val a_reqBuf = Module(new RequestBuffer)
   val mainPipe = Module(new MainPipe())
   val mshrCtl = Module(new MSHRCtl())
-  val directory = Module(new Directory(parentName + "dir_"))
-  val dataStorage = Module(new DataStorage(parentName + "data_"))
+  val directory = Module(new Directory)
+  val dataStorage = Module(new DataStorage)
   val refillUnit = Module(new RefillUnit())
   val sinkA = Module(new SinkA)
   val sinkB = Module(new SinkB)
   val sinkC = Module(new SinkC)
   val sourceC = Module(new SourceC)
-  val grantBuf = Module(new GrantBuffer(parentName + "grantBuf_"))
+  val grantBuf = Module(new GrantBuffer)
   val refillBuf = Module(new MSHRBuffer(wPorts = 3))
   val releaseBuf = Module(new MSHRBuffer(wPorts = 3))
 
-  val mbistPl = MBISTPipeline.PlaceMbistPipeline(2,
-    s"${parentName}_mbistPipe",
-    cacheParams.hasMbist && cacheParams.hasShareBus
-  )
+  val mbistPl = MbistPipeline.PlaceMbistPipeline(2, place = cacheParams.hasMbist)
 
   val prbq = Module(new ProbeQueue())
   prbq.io <> DontCare // @XiaBin TODO

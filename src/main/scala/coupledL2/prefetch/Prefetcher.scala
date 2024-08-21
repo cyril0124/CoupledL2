@@ -23,7 +23,7 @@ import xs.utils._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
 import coupledL2._
-import xs.utils.mbist.MBISTPipeline
+import xs.utils.mbist.MbistPipeline
 import xs.utils.perf.HasPerfLogging
 
 object AccessState {
@@ -240,9 +240,9 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
       // hybrid_pfts.io.db_degree.bits := pf_state
     case _ => assert(cond = false, "Unknown prefetcher")
   }
-  val mbistPl = MBISTPipeline.PlaceMbistPipeline(2,
+  val mbistPl = MbistPipeline.PlaceMbistPipeline(2,
     s"${parentName}_mbistPipe",
-    cacheParams.hasMbist && cacheParams.hasShareBus && hasSpp
+    cacheParams.hasMbist && hasSpp
   )
   XSPerfAccumulate("prefetch_train", io.train.fire)
   XSPerfAccumulate("prefetch_train_on_miss", io.train.fire && io.train.bits.state === AccessState.MISS)
