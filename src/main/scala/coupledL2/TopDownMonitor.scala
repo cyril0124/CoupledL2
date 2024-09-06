@@ -33,8 +33,7 @@ class TopDownMonitor()(implicit p: Parameters) extends L2Module with HasPerfLogg
           ms =>
             val msBlockAddr = if(bankBits == 0) Cat(ms.bits.reqTag, ms.bits.set)
             else Cat(ms.bits.reqTag, ms.bits.set, i.U(bankBits-1, 0))
-            val pBlockAddr  = (pAddr.bits >> 6.U).asUInt
-
+            val pBlockAddr  = (io.debugTopDown.robHeadPaddr.bits >> 6.U).asUInt
             val isMiss   = ms.valid && ms.bits.is_miss
             // pAddr.valid && msBlockAddr === pBlockAddr && isMiss
             io.debugTopDown.robHeadPaddr.valid && (msBlockAddr === pBlockAddr) && isMiss
