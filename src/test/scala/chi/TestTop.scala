@@ -148,14 +148,14 @@ class TestTop_CHIL2(numCores: Int = 1, numULAgents: Int = 0, banks: Int = 1)(imp
     }
 
     val io = IO(Vec(numCores, new Bundle() {
-      val chi = new PortIO
+      val chi = new PortIO(splitFlit = l2_nodes.head.p(L2ParamKey).splitFlit)
       val nodeId = Input(UInt(NODEID_WIDTH.W))
     }))
 
     l2_nodes.zipWithIndex.foreach { case (l2, i) =>
 
       if (!cacheParams.FPGAPlatform && cacheParams.enableCHILog) {
-        val chilogger = CHILogger(s"L3_L2[${i}]", true)
+        val chilogger = CHILogger(s"L3_L2[${i}]", true, splitFlit = l2_nodes.head.p(L2ParamKey).splitFlit)
         chilogger.io.up <> l2.module.io_chi
         chilogger.io.down <> io(i).chi
       }

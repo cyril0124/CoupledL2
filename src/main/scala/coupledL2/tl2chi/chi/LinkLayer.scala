@@ -22,19 +22,19 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import coupledL2.L2Module
 
-class ChannelIO[+T <: Data](gen: T) extends Bundle {
+class ChannelIO[+T <: Data](gen: T, splitFlit: Boolean = false) extends Bundle {
   // Flit Pending. Early indication that a flit might be transmitted in the following cycle
   val flitpend = Output(Bool()) // To be confirmed: can this be ignored?
   // Flit Valid. The transmitter sets the signal HIGH to indicate when FLIT[(W-1):0] is valid.
   val flitv = Output(Bool())
   // Flit.
-  val flit = Output(UInt(gen.getWidth.W))
+  val flit = if (splitFlit) Output(gen) else Output(UInt(gen.getWidth.W))
   // L-Credit Valid. The receiver sets this signal HIGH to return a channel L-Credit to a transmitter.
   val lcrdv = Input(Bool())
 }
 
 object ChannelIO {
-  def apply[T <: Data](gen: T): ChannelIO[T] = new ChannelIO(gen)
+  def apply[T <: Data](gen: T, splitFlit: Boolean = false): ChannelIO[T] = new ChannelIO(gen, splitFlit)
 
   private final class EmptyBundle extends Bundle
   def apply(): ChannelIO[Data] = apply(new EmptyBundle)
@@ -55,16 +55,16 @@ trait HasSystemCoherencyInterface { this: Bundle =>
   val syscoack = Input(Bool())
 }
 
-class DownwardsLinkIO(implicit p: Parameters) extends Bundle with HasLinkSwitch {
-  val req = ChannelIO(new CHIREQ)
-  val rsp = ChannelIO(new CHIRSP)
-  val dat = ChannelIO(new CHIDAT)
+class DownwardsLinkIO(splitFlit: Boolean = false)(implicit p: Parameters) extends Bundle with HasLinkSwitch {
+  val req = ChannelIO(new CHIREQ, splitFlit)
+  val rsp = ChannelIO(new CHIRSP, splitFlit)
+  val dat = ChannelIO(new CHIDAT, splitFlit)
 }
 
-class UpwardsLinkIO(implicit p: Parameters) extends Bundle with HasLinkSwitch {
-  val rsp = ChannelIO(new CHIRSP)
-  val dat = ChannelIO(new CHIDAT)
-  val snp = ChannelIO(new CHISNP)
+class UpwardsLinkIO(splitFlit: Boolean = false)(implicit p: Parameters) extends Bundle with HasLinkSwitch {
+  val rsp = ChannelIO(new CHIRSP, splitFlit)
+  val dat = ChannelIO(new CHIDAT, splitFlit)
+  val snp = ChannelIO(new CHISNP, splitFlit)
 }
 
 class DecoupledDownwardsLinkIO(implicit p: Parameters) extends Bundle {
@@ -89,11 +89,11 @@ class DecoupledUpwardsNoSnpLinkIO(implicit p: Parameters) extends Bundle {
   val dat = DecoupledIO(new CHIDAT)
 }
 
-class PortIO(implicit p: Parameters) extends Bundle
+class PortIO(splitFlit: Boolean = false)(implicit p: Parameters) extends Bundle
   with HasPortSwitch
   with HasSystemCoherencyInterface {
-  val tx = new DownwardsLinkIO
-  val rx = Flipped(new UpwardsLinkIO)
+  val tx = new DownwardsLinkIO(splitFlit)
+  val rx = Flipped(new UpwardsLinkIO(splitFlit))
 }
 
 class DecoupledPortIO(implicit p: Parameters) extends Bundle {
@@ -130,10 +130,11 @@ object LinkState {
 
 class LCredit2Decoupled[T <: Bundle](
   gen: T,
-  lcreditNum: Int = 4 // the number of L-Credits that a receiver can provide
+  lcreditNum: Int = 4, // the number of L-Credits that a receiver can provide,
+  splitFlit: Boolean = false
 ) extends Module {
   val io = IO(new Bundle() {
-    val in = Flipped(ChannelIO(gen.cloneType))
+    val in = Flipped(ChannelIO(gen.cloneType, splitFlit))
     val out = DecoupledIO(gen.cloneType)
     val state = Input(new LinkState())
     val reclaimLCredit = Output(Bool())
@@ -168,11 +169,14 @@ class LCredit2Decoupled[T <: Bundle](
   }
 
   queue.io.enq.valid := accept
-  // queue.io.enq.bits := io.in.bits
-  var lsb = 0
-  queue.io.enq.bits.getElements.reverse.foreach { case e =>
-    e := io.in.flit(lsb + e.asUInt.getWidth - 1, lsb).asTypeOf(e.cloneType)
-    lsb += e.asUInt.getWidth
+  if (splitFlit) {
+    queue.io.enq.bits := io.in.flit
+  } else {
+    var lsb = 0
+    queue.io.enq.bits.getElements.reverse.foreach { case e =>
+      e := io.in.flit.asUInt(lsb + e.asUInt.getWidth - 1, lsb).asTypeOf(e.cloneType)
+      lsb += e.asUInt.getWidth
+    }
   }
 
   assert(!accept || queue.io.enq.ready)
@@ -201,9 +205,10 @@ object LCredit2Decoupled {
     state: LinkState,
     reclaimLCredit: Bool,
     suggestName: Option[String] = None,
-    lcreditNum: Int = defaultLCreditNum
+    lcreditNum: Int = defaultLCreditNum,
+    splitFlit: Boolean = false
   ): Unit = {
-    val mod = Module(new LCredit2Decoupled(right.bits.cloneType, lcreditNum))
+    val mod = Module(new LCredit2Decoupled(right.bits.cloneType, lcreditNum, splitFlit))
     suggestName.foreach(name => mod.suggestName(s"LCredit2Decoupled_${name}"))
 
     mod.io.in <> left
@@ -213,10 +218,10 @@ object LCredit2Decoupled {
   }
 }
 
-class Decoupled2LCredit[T <: Bundle](gen: T) extends Module {
+class Decoupled2LCredit[T <: Bundle](gen: T, splitFlit: Boolean = false) extends Module {
   val io = IO(new Bundle() {
     val in = Flipped(DecoupledIO(gen.cloneType))
-    val out = ChannelIO(gen.cloneType)
+    val out = ChannelIO(gen.cloneType, splitFlit)
     val state = Input(new LinkState())
   })
 
@@ -250,7 +255,12 @@ class Decoupled2LCredit[T <: Bundle](gen: T) extends Module {
   io.out <> out
   out.flitpend := RegNext(true.B, init = false.B) // TODO
   out.flitv := RegNext(flitv, init = false.B)
-  out.flit := RegEnable(Mux(io.in.valid, Cat(io.in.bits.getElements.map(_.asUInt)), 0.U /* LCrdReturn */), flitv)
+
+  if (splitFlit) {
+    out.flit := RegEnable(Mux(io.in.valid, io.in.bits, 0.U.asTypeOf(out.flit.cloneType) /* LCrdReturn */), flitv)
+  } else {
+    out.flit := RegEnable(Mux(io.in.valid, Cat(io.in.bits.getElements.map(_.asUInt)), 0.U /* LCrdReturn */), flitv)
+  }
 }
 
 object Decoupled2LCredit {
@@ -258,9 +268,10 @@ object Decoupled2LCredit {
     left: DecoupledIO[T],
     right: ChannelIO[T],
     state: LinkState,
-    suggestName: Option[String] = None
+    suggestName: Option[String] = None,
+    splitFlit: Boolean = false
   ): Unit = {
-    val mod = Module(new Decoupled2LCredit(left.bits.cloneType))
+    val mod = Module(new Decoupled2LCredit(left.bits.cloneType, splitFlit))
     suggestName.foreach(name => mod.suggestName(s"Decoupled2LCredit_${name}"))
     
     mod.io.in <> left
@@ -269,10 +280,10 @@ object Decoupled2LCredit {
   }
 }
 
-class LinkMonitor(implicit p: Parameters) extends L2Module with HasCHIOpcodes {
+class LinkMonitor(splitFlit: Boolean = false)(implicit p: Parameters) extends L2Module with HasCHIOpcodes {
   val io = IO(new Bundle() {
     val in = Flipped(new DecoupledPortIO())
-    val out = new PortIO
+    val out = new PortIO(splitFlit = splitFlit)
     val nodeID = Input(UInt(NODEID_WIDTH.W))
   })
   // val s_stop :: s_activate :: s_run :: s_deactivate :: Nil = Enum(4)
@@ -292,12 +303,12 @@ class LinkMonitor(implicit p: Parameters) extends L2Module with HasCHIOpcodes {
   /* IO assignment */
   val rxsnpDeact, rxrspDeact, rxdatDeact = Wire(Bool())
   val rxDeact = rxsnpDeact && rxrspDeact && rxdatDeact
-  Decoupled2LCredit(setSrcID(io.in.tx.req, io.nodeID), io.out.tx.req, LinkState(txState), Some("txreq"))
-  Decoupled2LCredit(setSrcID(io.in.tx.rsp, io.nodeID), io.out.tx.rsp, LinkState(txState), Some("txrsp"))
-  Decoupled2LCredit(setSrcID(io.in.tx.dat, io.nodeID), io.out.tx.dat, LinkState(txState), Some("txdat"))
-  LCredit2Decoupled(io.out.rx.snp, io.in.rx.snp, LinkState(rxState), rxsnpDeact, Some("rxsnp"))
-  LCredit2Decoupled(io.out.rx.rsp, io.in.rx.rsp, LinkState(rxState), rxrspDeact, Some("rxrsp"))
-  LCredit2Decoupled(io.out.rx.dat, io.in.rx.dat, LinkState(rxState), rxdatDeact, Some("rxdat"))
+  Decoupled2LCredit(setSrcID(io.in.tx.req, io.nodeID), io.out.tx.req, LinkState(txState), Some("txreq"), splitFlit = splitFlit)
+  Decoupled2LCredit(setSrcID(io.in.tx.rsp, io.nodeID), io.out.tx.rsp, LinkState(txState), Some("txrsp"), splitFlit = splitFlit)
+  Decoupled2LCredit(setSrcID(io.in.tx.dat, io.nodeID), io.out.tx.dat, LinkState(txState), Some("txdat"), splitFlit = splitFlit)
+  LCredit2Decoupled(io.out.rx.snp, io.in.rx.snp, LinkState(rxState), rxsnpDeact, Some("rxsnp"), splitFlit = splitFlit)
+  LCredit2Decoupled(io.out.rx.rsp, io.in.rx.rsp, LinkState(rxState), rxrspDeact, Some("rxrsp"), splitFlit = splitFlit)
+  LCredit2Decoupled(io.out.rx.dat, io.in.rx.dat, LinkState(rxState), rxdatDeact, Some("rxdat"), splitFlit = splitFlit)
 
   io.out.txsactive := true.B
   io.out.tx.linkactivereq := RegNext(true.B, init = false.B)

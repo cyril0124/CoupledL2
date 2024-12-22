@@ -68,7 +68,7 @@ class TL2CHICoupledL2(implicit p: Parameters) extends CoupledL2Base {
   class CoupledL2Imp(wrapper: LazyModule) extends BaseCoupledL2Imp(wrapper)
     with HasCHIOpcodes {
 
-    val io_chi = IO(new PortIO)
+    val io_chi = IO(new PortIO(p(L2ParamKey).splitFlit))
     val io_nodeID = IO(Input(UInt()))
 
     // Check port width
@@ -246,7 +246,7 @@ class TL2CHICoupledL2(implicit p: Parameters) extends CoupledL2Base {
           Cat(slices.zipWithIndex.map { case (s, i) => s.io.out.rx.dat.ready && rxdatSliceID === i.U}).orR
         )
 
-        val linkMonitor = Module(new LinkMonitor)
+        val linkMonitor = Module(new LinkMonitor(p(L2ParamKey).splitFlit))
         linkMonitor.io.in.tx.req <> txreq
         linkMonitor.io.in.tx.rsp <> txrsp
         linkMonitor.io.in.tx.dat <> txdat

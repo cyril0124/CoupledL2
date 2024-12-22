@@ -122,7 +122,10 @@ case class L2Param(
   dataCheck: Option[String] = None,
 
   // Network layer SAM
-  sam: Seq[(AddressSet, Int)] = Seq(AddressSet.everything -> 0)
+  sam: Seq[(AddressSet, Int)] = Seq(AddressSet.everything -> 0),
+
+  // Split chi flit into multiple fields
+  splitFlit: Boolean = false
 ) {
   def toCacheParams: CacheParameters = CacheParameters(
     name = name,

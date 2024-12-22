@@ -24,12 +24,12 @@ import freechips.rocketchip.util._
 import scala.collection.immutable.{ListMap, SeqMap}
 import utility.ChiselDB
 
-class CHILogger(name: String, enable: Boolean)
+class CHILogger(name: String, enable: Boolean, splitFlit: Boolean = false)
                (implicit val p: Parameters) extends Module with HasCHIOpcodes {
 
   val io = IO(new Bundle() {
-    val up = Flipped(new PortIO)
-    val down = new PortIO
+    val up = Flipped(new PortIO(splitFlit))
+    val down = new PortIO(splitFlit)
   })
   io.down <> io.up
 
@@ -88,7 +88,7 @@ class CHILogger(name: String, enable: Boolean)
         case (flit, chn) =>
           var lsb = 0
           flit.getElements.reverse.foreach { case e =>
-            e := chn.flit(lsb + e.asUInt.getWidth - 1, lsb).asTypeOf(e.cloneType)
+            e := chn.flit.asUInt(lsb + e.asUInt.getWidth - 1, lsb).asTypeOf(e.cloneType)
             lsb += e.asUInt.getWidth
           }
       }
@@ -182,13 +182,13 @@ class CHILogger(name: String, enable: Boolean)
 
 object CHILogger {
   
-  def apply(name: String, enable: Boolean)(implicit p: Parameters) = {
-    val logger = Module(new CHILogger(name, enable)(p))
+  def apply(name: String, enable: Boolean, splitFlit: Boolean)(implicit p: Parameters) = {
+    val logger = Module(new CHILogger(name, enable, splitFlit)(p))
     logger
   }
 
-  def apply(name: String, issue: String, enable: Boolean)(implicit p: Parameters) = {
-    val logger = Module(new CHILogger(name, enable)(
+  def apply(name: String, issue: String, enable: Boolean, splitFlit: Boolean)(implicit p: Parameters) = {
+    val logger = Module(new CHILogger(name, enable, splitFlit)(
       p.alterPartial { case CHIIssue => issue }
     ))
     logger
