@@ -87,6 +87,7 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1)(impl
       splitFlit = true
     )
     case EnableCHI => true
+    case CHIIssue => p(CHIIssue)
     case BankBitsKey => log2Ceil(banks)
     case MaxHartIdBits => log2Up(numCores)
     case PerfCounterOptionsKey => PerfCounterOptions(false, false, 0)
@@ -165,6 +166,7 @@ object TestTopForUT extends App {
       elaboratedTopDown = false,
       FPGAPlatform = true
     )
+    case CHIIssue => "E.b"
   })
 
   val top = DisableMonitors(
