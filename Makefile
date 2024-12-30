@@ -67,7 +67,7 @@ test-top-chi-quadcore-2ul:
 	$(MAKE) gen-test-top-chi SYSTEM=CHIL2 $(CHI_PASS_ARGS) NUM_CORE=4 NUM_TL_UL=2
 
 test-top-ut:
-	mill -i CoupledL2.test.runMain coupledL2.TestTopForUT -td $(BUILD_DIR)/TestTop -e sverilog --no-dce
+	mill -i CoupledL2.test.runMain coupledL2.TestTopForUT -td $(BUILD_DIR)/TestTop -e verilog --no-dce
 
 clean:
 	rm -rf ./build
