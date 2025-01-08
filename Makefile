@@ -69,6 +69,9 @@ test-top-chi-quadcore-2ul:
 test-top-ut:
 	mill -i CoupledL2.test.runMain coupledL2.TestTopForUT -td $(BUILD_DIR)/TestTop -e verilog --no-dce
 
+test-top-ut-mmio:
+	mill -i CoupledL2.test.runMain coupledL2.MMIOBridgeTop -td $(BUILD_DIR)/MMIOBridgeTop -e verilog --no-dce
+
 clean:
 	rm -rf ./build
 

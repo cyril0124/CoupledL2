@@ -154,6 +154,31 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1)(impl
 
 }
 
+class MMIOBridgeTop()(implicit p: Parameters) extends LazyModule {
+  val mmioClientNode = TLClientNode(Seq(
+    TLMasterPortParameters.v1(
+      clients = Seq(TLMasterParameters.v1(
+        name = "mmio",
+        sourceId = IdRange(0, 7),
+      )),
+      requestFields = Seq(MemBackTypeMMField(), MemPageTypeNCField())
+    )
+  ))
+
+  val mmioBridge = LazyModule(new MMIOBridge())
+
+  mmioBridge.mmioNode := mmioClientNode
+
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new DecoupledNoSnpPortIO)
+    val io_pCrd = IO(Vec(p(L2ParamKey).mmioBridgeSize, new PCrdQueryBundle))
+    
+    mmioClientNode.makeIOs()(ValName("mmioClient"))
+
+    mmioBridge.module.io <> io
+    mmioBridge.module.io_pCrd <> io_pCrd
+  }
+}
 
 object TestTopForUT extends App {
 
@@ -176,6 +201,28 @@ object TestTopForUT extends App {
             numULAgents = 1,
             banks = 1
         )(p)
+    )
+  )(config)
+
+  (new ChiselStage).execute(args, Seq(ChiselGeneratorAnnotation(() => top.module)))
+}
+
+object MMIOBridgeTop extends App {
+  val config = new Config((_, _, _) => {
+    case L2ParamKey => L2Param(
+      enablePerf = false,
+      enableRollingDB = false,
+      enableMonitor = false,
+      enableTLLog = false,
+      elaboratedTopDown = false,
+      FPGAPlatform = true
+    )
+    case CHIIssue => "E.b"
+  })
+
+  val top = DisableMonitors(
+    p => LazyModule(
+      new MMIOBridgeTop()(p)
     )
   )(config)
 
