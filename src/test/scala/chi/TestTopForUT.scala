@@ -13,6 +13,81 @@ import coupledL2.prefetch._
 import coupledL2.tl2chi._
 import utility.{ChiselDB, FileRegisters, TLLogger}
 
+class SplitCHIREQ()(implicit p: Parameters) extends TL2CHIL2Module {
+  val io = IO(new Bundle {
+    val mergedFlit = Input(UInt((new CHIREQ).getWidth.W))
+    val splitFlit = Output(new CHIREQ)
+  })
+
+  var lsb = 0
+  io.splitFlit.getElements.reverse.foreach {
+    case e =>
+      val elementWidth = e.asUInt.getWidth
+      e := io.mergedFlit.asUInt(lsb + elementWidth - 1, lsb).asTypeOf(e.cloneType)
+      lsb += elementWidth
+  }
+}
+
+class SplitCHIRSP(reverse: Boolean = false)(implicit p: Parameters) extends TL2CHIL2Module {
+  val io = IO(new Bundle {
+    val mergedFlit = if(reverse) Output(UInt((new CHIRSP).getWidth.W)) else Input(UInt((new CHIRSP).getWidth.W))
+    val splitFlit = if(reverse) Input(new CHIRSP) else Output(new CHIRSP)
+  })
+
+  if(reverse) {
+    val mergedBits = io.splitFlit.getElements.map(_.asUInt)
+    io.mergedFlit := Cat(mergedBits)
+  } else {
+    var lsb = 0
+    io.splitFlit.getElements.reverse.foreach {
+      case e =>
+        val elementWidth = e.asUInt.getWidth
+        e := io.mergedFlit.asUInt(lsb + elementWidth - 1, lsb).asTypeOf(e.cloneType)
+        lsb += elementWidth
+    }
+  }
+}
+
+class SplitCHIDAT(reverse: Boolean = false)(implicit p: Parameters) extends TL2CHIL2Module {
+  val io = IO(new Bundle {
+    val mergedFlit = if(reverse) Output(UInt((new CHIDAT).getWidth.W)) else Input(UInt((new CHIDAT).getWidth.W))
+    val splitFlit = if(reverse) Input(new CHIDAT) else Output(new CHIDAT)
+  })
+
+  if(reverse) {
+    val mergedBits = io.splitFlit.getElements.map(_.asUInt)
+    io.mergedFlit := Cat(mergedBits)
+  } else {
+    var lsb = 0
+    io.splitFlit.getElements.reverse.foreach {
+      case e =>
+        val elementWidth = e.asUInt.getWidth
+        e := io.mergedFlit.asUInt(lsb + elementWidth - 1, lsb).asTypeOf(e.cloneType)
+        lsb += elementWidth
+    }
+  }
+}
+
+class SplitCHISNP(reverse: Boolean = false)(implicit p: Parameters) extends TL2CHIL2Module {
+  val io = IO(new Bundle {
+    val mergedFlit = if(reverse) Output(UInt((new CHISNP).getWidth.W)) else Input(UInt((new CHISNP).getWidth.W))
+    val splitFlit = if(reverse) Input(new CHISNP) else Output(new CHISNP)
+  })
+
+  if(reverse) {
+    val mergedBits = io.splitFlit.getElements.map(_.asUInt)
+    io.mergedFlit := Cat(mergedBits)
+  } else {
+    var lsb = 0
+    io.splitFlit.getElements.reverse.foreach {
+      case e =>
+        val elementWidth = e.asUInt.getWidth
+        e := io.mergedFlit.asUInt(lsb + elementWidth - 1, lsb).asTypeOf(e.cloneType)
+        lsb += elementWidth
+    }
+  }
+}
+
 class SimpleEndpointCHI()(implicit p: Parameters) extends TL2CHIL2Module {
     val io = IO(new Bundle {
         val chi = Flipped(new PortIO(splitFlit = true))
@@ -30,6 +105,8 @@ class SimpleEndpointCHI()(implicit p: Parameters) extends TL2CHIL2Module {
 
 class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1)(implicit p: Parameters) extends LazyModule
   with HasCHIMsgParameters {
+
+  assert(numCores == 1)
 
   override lazy val desiredName: String = "TestTop"
   val delayFactor = 0.5
@@ -56,14 +133,14 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1)(impl
     masterNode
   }
 
-  val l1d_nodes = (0 until numCores).map(i => createClientNode(s"l1d$i", 16))
+  val l1d_nodes = (0 until numCores).map(i => createClientNode(s"l1d$i", 64))
   val l1i_nodes = (0 until numCores).map {i =>
     (0 until numULAgents).map { j =>
       TLClientNode(Seq(
         TLMasterPortParameters.v1(
           clients = Seq(TLMasterParameters.v1(
             name = s"l1i${i}_${j}",
-            sourceId = IdRange(0, 15)
+            sourceId = IdRange(0, 63)
           ))
         )
       ))
@@ -71,20 +148,9 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1)(impl
   }
 
   val l2_nodes = (0 until numCores).map(i => LazyModule(new TL2CHICoupledL2()(new Config((_, _, _) => {
-    case L2ParamKey => L2Param(
+    case L2ParamKey => p(L2ParamKey).copy(
       name = s"l2$i",
-      ways = 4,
-      sets = 256,
-      clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
-      // echoField = Seq(DirtyField),
-      enablePerf = false,
-      enableRollingDB = false,
-      enableMonitor = false,
-      enableTLLog = false,
-      elaboratedTopDown = false,
-      FPGAPlatform = false,
-      hartId = i,
-      splitFlit = true
+      hartId = i
     )
     case EnableCHI => true
     case CHIIssue => p(CHIIssue)
@@ -95,6 +161,7 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1)(impl
 
   val bankBinders = (0 until numCores).map(_ => BankBinder(banks, 64))
 
+  var mmioClientNodes: Seq[TLClientNode] = Nil
   l1d_nodes.zip(l2_nodes).zipWithIndex.foreach { case ((l1d, l2), i) =>
     val l1xbar = TLXbar()
 
@@ -122,6 +189,8 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1)(impl
       )
     ))
 
+    mmioClientNodes = mmioClientNodes ++ Seq(mmioClientNode)
+
     l2.mmioBridge.mmioNode := mmioClientNode
   }
 
@@ -139,15 +208,84 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1)(impl
       }
     }
 
+    mmioClientNodes.zipWithIndex.foreach { case(node, i) =>
+      node.makeIOs()(ValName(s"mmioBridge_${i}_"))
+    }
+
     l2_nodes.zipWithIndex.foreach { case (l2, i) =>
       dontTouch(l2.module.io)
 
       val chiEndpoint = Module(new SimpleEndpointCHI())
-      chiEndpoint.io.chi <> l2.module.io_chi
+
+      if(p(L2ParamKey).splitFlit) {
+        chiEndpoint.io.chi <> l2.module.io_chi
+      } else {
+        chiEndpoint.io.chi.rxsactive <> l2.module.io_chi.rxsactive
+        chiEndpoint.io.chi.txsactive <> l2.module.io_chi.txsactive
+        chiEndpoint.io.chi.syscoack <> l2.module.io_chi.syscoack
+        chiEndpoint.io.chi.syscoreq <> l2.module.io_chi.syscoreq
+        chiEndpoint.io.chi.tx.linkactiveack <> l2.module.io_chi.tx.linkactiveack
+        chiEndpoint.io.chi.tx.linkactivereq <> l2.module.io_chi.tx.linkactivereq
+        chiEndpoint.io.chi.rx.linkactiveack <> l2.module.io_chi.rx.linkactiveack
+        chiEndpoint.io.chi.rx.linkactivereq <> l2.module.io_chi.rx.linkactivereq
+
+        val in_rx = chiEndpoint.io.chi.rx
+        val out_rx = l2.module.io_chi.rx
+
+        in_rx.rsp.flitpend <> out_rx.rsp.flitpend
+        in_rx.rsp.flitv <> out_rx.rsp.flitv
+        in_rx.rsp.lcrdv <> out_rx.rsp.lcrdv
+        val splitRXRSP = Module(new SplitCHIRSP(reverse = true))
+        out_rx.rsp.flit := splitRXRSP.io.mergedFlit
+        splitRXRSP.io.splitFlit := in_rx.rsp.flit
+
+
+        in_rx.dat.flitpend <> out_rx.dat.flitpend
+        in_rx.dat.flitv <> out_rx.dat.flitv
+        in_rx.dat.lcrdv <> out_rx.dat.lcrdv
+        val splitRXDAT = Module(new SplitCHIDAT(reverse = true))
+        out_rx.dat.flit := splitRXDAT.io.mergedFlit
+        splitRXDAT.io.splitFlit := in_rx.dat.flit
+
+        
+        in_rx.snp.flitpend <> out_rx.snp.flitpend
+        in_rx.snp.flitv <> out_rx.snp.flitv
+        in_rx.snp.lcrdv <> out_rx.snp.lcrdv
+        val splitRXSNP = Module(new SplitCHISNP(reverse = true))
+        out_rx.snp.flit := splitRXSNP.io.mergedFlit
+        splitRXSNP.io.splitFlit := in_rx.snp.flit
+
+
+        val in_tx = chiEndpoint.io.chi.tx
+        val out_tx = l2.module.io_chi.tx
+        in_tx.req.flitpend <> out_tx.req.flitpend
+        in_tx.req.flitv <> out_tx.req.flitv
+        in_tx.req.lcrdv <> out_tx.req.lcrdv
+        val splitTXREQ = Module(new SplitCHIREQ)
+        splitTXREQ.io.mergedFlit := out_tx.req.flit
+        in_tx.req.flit := splitTXREQ.io.splitFlit
+
+
+        in_tx.rsp.flitpend <> out_tx.rsp.flitpend
+        in_tx.rsp.flitv <> out_tx.rsp.flitv
+        in_tx.rsp.lcrdv <> out_tx.rsp.lcrdv
+        val splitTXRSP = Module(new SplitCHIRSP)
+        splitTXRSP.io.mergedFlit := out_tx.rsp.flit
+        in_tx.rsp.flit := splitTXRSP.io.splitFlit
+
+
+        in_tx.dat.flitpend <> out_tx.dat.flitpend
+        in_tx.dat.flitv <> out_tx.dat.flitv
+        in_tx.dat.lcrdv <> out_tx.dat.lcrdv
+        val splitTXDAT = Module(new SplitCHIDAT)
+        splitTXDAT.io.mergedFlit := out_tx.dat.flit
+        in_tx.dat.flit := splitTXDAT.io.splitFlit
+      }
 
       l2.module.io.hartId := i.U
       l2.module.io_nodeID := i.U(NODEID_WIDTH.W)
       l2.module.io.debugTopDown := DontCare
+      l2.module.io.pfCtrlFromCore := DontCare
       l2.module.io.l2_tlb_req <> DontCare
     }
   }
@@ -182,16 +320,24 @@ class MMIOBridgeTop()(implicit p: Parameters) extends LazyModule {
 
 object TestTopForUT extends App {
 
+  val isReleaseRTL = sys.env.getOrElse("RELEASE_RTL", "0") == "1"
+  println(s"isReleaseRTL: $isReleaseRTL")
+
   val config = new Config((_, _, _) => {
     case L2ParamKey => L2Param(
-      enablePerf = false,
+      ways = 4,
+      sets = 256,
+      clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
+      enablePerf = false, 
       enableRollingDB = false,
       enableMonitor = false,
       enableTLLog = false,
-      elaboratedTopDown = false,
-      FPGAPlatform = true
+      elaboratedTopDown = false, 
+      FPGAPlatform = false,
+      splitFlit = false,
+      dataCheck = Some("none")
     )
-    case CHIIssue => "E.b"
+    case CHIIssue => if(isReleaseRTL) "B" else "E.b"
   })
 
   val top = DisableMonitors(
@@ -199,7 +345,7 @@ object TestTopForUT extends App {
         new TestTopForUT( 
             numCores = 1,
             numULAgents = 1,
-            banks = 1
+            banks = if(isReleaseRTL) 4 else 1
         )(p)
     )
   )(config)
@@ -210,12 +356,18 @@ object TestTopForUT extends App {
 object MMIOBridgeTop extends App {
   val config = new Config((_, _, _) => {
     case L2ParamKey => L2Param(
+      ways = 2,
+      sets = 2,
+      mshrs = 4,
+      mmioBridgeSize = 8,
       enablePerf = false,
       enableRollingDB = false,
       enableMonitor = false,
       enableTLLog = false,
       elaboratedTopDown = false,
-      FPGAPlatform = true
+      FPGAPlatform = false,
+      splitFlit = true,
+      dataCheck = Some("none")
     )
     case CHIIssue => "E.b"
   })
