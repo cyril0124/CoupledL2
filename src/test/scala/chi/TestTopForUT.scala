@@ -88,6 +88,52 @@ class SplitCHISNP(reverse: Boolean = false)(implicit p: Parameters) extends TL2C
   }
 }
 
+
+class ReverseLinkMonitor(splitFlit: Boolean = false)(implicit p: Parameters) extends L2Module with HasCHIOpcodes {
+  val io = IO(new Bundle() {
+    val out = new DecoupledPortIO
+    val in = Flipped(new PortIO(splitFlit = splitFlit))
+    val nodeID = Input(UInt(NODEID_WIDTH.W))
+  })
+
+  val txState = RegInit(LinkStates.STOP)
+  val rxState = RegInit(LinkStates.STOP)
+
+  Seq(txState, rxState).zip(MixedVecInit(Seq(io.in.tx, io.in.rx))).foreach { case (state, link) =>
+    state := MuxLookup(Cat(link.linkactivereq, link.linkactiveack), LinkStates.STOP)(Seq(
+      Cat(true.B, false.B) -> LinkStates.ACTIVATE,
+      Cat(true.B, true.B) -> LinkStates.RUN,
+      Cat(false.B, true.B) -> LinkStates.DEACTIVATE,
+      Cat(false.B, false.B) -> LinkStates.STOP
+    ))
+  }
+
+  val txreqDeact, txrspDeact, txdatDeact = Wire(Bool())
+  val txDeact = txreqDeact && txrspDeact && txdatDeact
+  LCredit2Decoupled(io.in.tx.req, io.out.tx.req, LinkState(txState), txreqDeact, Some("txreq"), splitFlit = splitFlit)
+  LCredit2Decoupled(io.in.tx.rsp, io.out.tx.rsp, LinkState(txState), txrspDeact, Some("txrsp"), splitFlit = splitFlit)
+  LCredit2Decoupled(io.in.tx.dat, io.out.tx.dat, LinkState(txState), txdatDeact, Some("txdat"), splitFlit = splitFlit)
+  Decoupled2LCredit(setSrcID(io.out.rx.snp, io.nodeID), io.in.rx.snp, LinkState(rxState), Some("rxsnp"), splitFlit = splitFlit)
+  Decoupled2LCredit(setSrcID(io.out.rx.rsp, io.nodeID), io.in.rx.rsp, LinkState(rxState), Some("rxrsp"), splitFlit = splitFlit)
+  Decoupled2LCredit(setSrcID(io.out.rx.dat, io.nodeID), io.in.rx.dat, LinkState(rxState), Some("rxdat"), splitFlit = splitFlit)
+
+  io.in.rxsactive := true.B
+  io.in.rx.linkactivereq := RegNext(true.B, init = false.B)
+  io.in.tx.linkactiveack := RegNext(
+    next = RegNext(io.in.tx.linkactivereq) || !txDeact,
+    init = false.B
+  )
+
+  io.in.syscoack := true.B
+
+  def setSrcID[T <: Bundle](in: DecoupledIO[T], srcID: UInt = 0.U): DecoupledIO[T] = {
+    val out = Wire(in.cloneType)
+    out <> in
+    out.bits.elements.filter(_._1 == "srcID").head._2 := srcID
+    out
+  }
+}
+
 class SimpleEndpointCHI()(implicit p: Parameters) extends TL2CHIL2Module {
     val io = IO(new Bundle {
         val chi = Flipped(new PortIO(splitFlit = true))
@@ -103,7 +149,7 @@ class SimpleEndpointCHI()(implicit p: Parameters) extends TL2CHIL2Module {
     dontTouch(io)
 }
 
-class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1)(implicit p: Parameters) extends LazyModule
+class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1, mmioBridgeTop: Boolean = false)(implicit p: Parameters) extends LazyModule
   with HasCHIMsgParameters {
 
   assert(numCores == 1)
@@ -124,8 +170,8 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1)(impl
         ),
         channelBytes = TLChannelBeatBytes(cacheParams.blockBytes),
         minLatency = 1,
-        echoFields = Nil,
-        requestFields = Seq(AliasField(2)),
+        echoFields = Seq(IsKeywordField()),
+        requestFields = Seq(AliasField(2), VaddrField(36), PrefetchField()),
         responseKeys = cacheParams.respKey
       )
     ))
@@ -184,8 +230,10 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1)(impl
     val mmioClientNode = TLClientNode(Seq(
       TLMasterPortParameters.v1(
         clients = Seq(TLMasterParameters.v1(
-          "uncache"
-        ))
+          name = "mmio",
+          sourceId = IdRange(0, 7),
+        )),
+        requestFields = Seq(MemBackTypeMMField(), MemPageTypeNCField())
       )
     ))
 
@@ -195,15 +243,17 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1)(impl
   }
 
   lazy val module = new LazyModuleImp(this){
-    l1d_nodes.zipWithIndex.foreach{
-      case (node, i) =>
-        node.makeIOs()(ValName(s"master_port_$i"))
-    }
+    if(!mmioBridgeTop) {
+      l1d_nodes.zipWithIndex.foreach{
+        case (node, i) =>
+          node.makeIOs()(ValName(s"master_port_$i"))
+      }
 
-    if (numULAgents != 0) {
-      l1i_nodes.zipWithIndex.foreach { case (core, i) =>
-        core.zipWithIndex.foreach { case (node, j) =>
-          node.makeIOs()(ValName(s"master_ul_port_${i}_${j}"))
+      if (numULAgents != 0) {
+        l1i_nodes.zipWithIndex.foreach { case (core, i) =>
+          core.zipWithIndex.foreach { case (node, j) =>
+            node.makeIOs()(ValName(s"master_ul_port_${i}_${j}"))
+          }
         }
       }
     }
@@ -212,74 +262,91 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1)(impl
       node.makeIOs()(ValName(s"mmioBridge_${i}_"))
     }
 
+    val io = IO(new Bundle {
+      val chi = if(mmioBridgeTop) Some(new DecoupledPortIO) else None
+    })
+
     l2_nodes.zipWithIndex.foreach { case (l2, i) =>
       dontTouch(l2.module.io)
 
-      val chiEndpoint = Module(new SimpleEndpointCHI())
+      val chiEndpoint = if(!mmioBridgeTop) Some(Module(new SimpleEndpointCHI())) else None
+      val reverseLinkMonitor = if(mmioBridgeTop) Some(Module(new ReverseLinkMonitor(splitFlit = p(L2ParamKey).splitFlit))) else None
+      reverseLinkMonitor.foreach { r =>
+        r.io.nodeID := 0.U
+        r.io.out <> io.chi.get
+      }
 
       if(p(L2ParamKey).splitFlit) {
-        chiEndpoint.io.chi <> l2.module.io_chi
+        if(!mmioBridgeTop) {
+          chiEndpoint.get.io.chi <> l2.module.io_chi
+        } else {
+          reverseLinkMonitor.get.io.in <> l2.module.io_chi
+        }
       } else {
-        chiEndpoint.io.chi.rxsactive <> l2.module.io_chi.rxsactive
-        chiEndpoint.io.chi.txsactive <> l2.module.io_chi.txsactive
-        chiEndpoint.io.chi.syscoack <> l2.module.io_chi.syscoack
-        chiEndpoint.io.chi.syscoreq <> l2.module.io_chi.syscoreq
-        chiEndpoint.io.chi.tx.linkactiveack <> l2.module.io_chi.tx.linkactiveack
-        chiEndpoint.io.chi.tx.linkactivereq <> l2.module.io_chi.tx.linkactivereq
-        chiEndpoint.io.chi.rx.linkactiveack <> l2.module.io_chi.rx.linkactiveack
-        chiEndpoint.io.chi.rx.linkactivereq <> l2.module.io_chi.rx.linkactivereq
+        if(!mmioBridgeTop) {
+          chiEndpoint.get.io.chi.rxsactive <> l2.module.io_chi.rxsactive
+          chiEndpoint.get.io.chi.txsactive <> l2.module.io_chi.txsactive
+          chiEndpoint.get.io.chi.syscoack <> l2.module.io_chi.syscoack
+          chiEndpoint.get.io.chi.syscoreq <> l2.module.io_chi.syscoreq
+          chiEndpoint.get.io.chi.tx.linkactiveack <> l2.module.io_chi.tx.linkactiveack
+          chiEndpoint.get.io.chi.tx.linkactivereq <> l2.module.io_chi.tx.linkactivereq
+          chiEndpoint.get.io.chi.rx.linkactiveack <> l2.module.io_chi.rx.linkactiveack
+          chiEndpoint.get.io.chi.rx.linkactivereq <> l2.module.io_chi.rx.linkactivereq
 
-        val in_rx = chiEndpoint.io.chi.rx
-        val out_rx = l2.module.io_chi.rx
+          val in_rx = chiEndpoint.get.io.chi.rx
+          val out_rx = l2.module.io_chi.rx
 
-        in_rx.rsp.flitpend <> out_rx.rsp.flitpend
-        in_rx.rsp.flitv <> out_rx.rsp.flitv
-        in_rx.rsp.lcrdv <> out_rx.rsp.lcrdv
-        val splitRXRSP = Module(new SplitCHIRSP(reverse = true))
-        out_rx.rsp.flit := splitRXRSP.io.mergedFlit
-        splitRXRSP.io.splitFlit := in_rx.rsp.flit
-
-
-        in_rx.dat.flitpend <> out_rx.dat.flitpend
-        in_rx.dat.flitv <> out_rx.dat.flitv
-        in_rx.dat.lcrdv <> out_rx.dat.lcrdv
-        val splitRXDAT = Module(new SplitCHIDAT(reverse = true))
-        out_rx.dat.flit := splitRXDAT.io.mergedFlit
-        splitRXDAT.io.splitFlit := in_rx.dat.flit
-
-        
-        in_rx.snp.flitpend <> out_rx.snp.flitpend
-        in_rx.snp.flitv <> out_rx.snp.flitv
-        in_rx.snp.lcrdv <> out_rx.snp.lcrdv
-        val splitRXSNP = Module(new SplitCHISNP(reverse = true))
-        out_rx.snp.flit := splitRXSNP.io.mergedFlit
-        splitRXSNP.io.splitFlit := in_rx.snp.flit
+          in_rx.rsp.flitpend <> out_rx.rsp.flitpend
+          in_rx.rsp.flitv <> out_rx.rsp.flitv
+          in_rx.rsp.lcrdv <> out_rx.rsp.lcrdv
+          val splitRXRSP = Module(new SplitCHIRSP(reverse = true))
+          out_rx.rsp.flit := splitRXRSP.io.mergedFlit
+          splitRXRSP.io.splitFlit := in_rx.rsp.flit
 
 
-        val in_tx = chiEndpoint.io.chi.tx
-        val out_tx = l2.module.io_chi.tx
-        in_tx.req.flitpend <> out_tx.req.flitpend
-        in_tx.req.flitv <> out_tx.req.flitv
-        in_tx.req.lcrdv <> out_tx.req.lcrdv
-        val splitTXREQ = Module(new SplitCHIREQ)
-        splitTXREQ.io.mergedFlit := out_tx.req.flit
-        in_tx.req.flit := splitTXREQ.io.splitFlit
+          in_rx.dat.flitpend <> out_rx.dat.flitpend
+          in_rx.dat.flitv <> out_rx.dat.flitv
+          in_rx.dat.lcrdv <> out_rx.dat.lcrdv
+          val splitRXDAT = Module(new SplitCHIDAT(reverse = true))
+          out_rx.dat.flit := splitRXDAT.io.mergedFlit
+          splitRXDAT.io.splitFlit := in_rx.dat.flit
+
+          
+          in_rx.snp.flitpend <> out_rx.snp.flitpend
+          in_rx.snp.flitv <> out_rx.snp.flitv
+          in_rx.snp.lcrdv <> out_rx.snp.lcrdv
+          val splitRXSNP = Module(new SplitCHISNP(reverse = true))
+          out_rx.snp.flit := splitRXSNP.io.mergedFlit
+          splitRXSNP.io.splitFlit := in_rx.snp.flit
 
 
-        in_tx.rsp.flitpend <> out_tx.rsp.flitpend
-        in_tx.rsp.flitv <> out_tx.rsp.flitv
-        in_tx.rsp.lcrdv <> out_tx.rsp.lcrdv
-        val splitTXRSP = Module(new SplitCHIRSP)
-        splitTXRSP.io.mergedFlit := out_tx.rsp.flit
-        in_tx.rsp.flit := splitTXRSP.io.splitFlit
+          val in_tx = chiEndpoint.get.io.chi.tx
+          val out_tx = l2.module.io_chi.tx
+          in_tx.req.flitpend <> out_tx.req.flitpend
+          in_tx.req.flitv <> out_tx.req.flitv
+          in_tx.req.lcrdv <> out_tx.req.lcrdv
+          val splitTXREQ = Module(new SplitCHIREQ)
+          splitTXREQ.io.mergedFlit := out_tx.req.flit
+          in_tx.req.flit := splitTXREQ.io.splitFlit
 
 
-        in_tx.dat.flitpend <> out_tx.dat.flitpend
-        in_tx.dat.flitv <> out_tx.dat.flitv
-        in_tx.dat.lcrdv <> out_tx.dat.lcrdv
-        val splitTXDAT = Module(new SplitCHIDAT)
-        splitTXDAT.io.mergedFlit := out_tx.dat.flit
-        in_tx.dat.flit := splitTXDAT.io.splitFlit
+          in_tx.rsp.flitpend <> out_tx.rsp.flitpend
+          in_tx.rsp.flitv <> out_tx.rsp.flitv
+          in_tx.rsp.lcrdv <> out_tx.rsp.lcrdv
+          val splitTXRSP = Module(new SplitCHIRSP)
+          splitTXRSP.io.mergedFlit := out_tx.rsp.flit
+          in_tx.rsp.flit := splitTXRSP.io.splitFlit
+
+
+          in_tx.dat.flitpend <> out_tx.dat.flitpend
+          in_tx.dat.flitv <> out_tx.dat.flitv
+          in_tx.dat.lcrdv <> out_tx.dat.lcrdv
+          val splitTXDAT = Module(new SplitCHIDAT)
+          splitTXDAT.io.mergedFlit := out_tx.dat.flit
+          in_tx.dat.flit := splitTXDAT.io.splitFlit
+        } else {
+          reverseLinkMonitor.get.io.in <> l2.module.io_chi
+        }
       }
 
       l2.module.io.hartId := i.U
@@ -287,6 +354,8 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1)(impl
       l2.module.io.debugTopDown := DontCare
       l2.module.io.pfCtrlFromCore := DontCare
       l2.module.io.l2_tlb_req <> DontCare
+
+      dontTouch(l2.module.io_nodeID)
     }
   }
 
@@ -320,14 +389,30 @@ class MMIOBridgeTop()(implicit p: Parameters) extends LazyModule {
 
 object TestTopForUT extends App {
 
+  val isMMIOBridgeTop = sys.env.getOrElse("MMIOBRIDGE_TOP", "0") == "1"
   val isReleaseRTL = sys.env.getOrElse("RELEASE_RTL", "0") == "1"
-  println(s"isReleaseRTL: $isReleaseRTL")
+  println(s"isMMIOBridgeTop: $isMMIOBridgeTop, isReleaseRTL: $isReleaseRTL")
+
+  Constantin.init(false)
 
   val config = new Config((_, _, _) => {
     case L2ParamKey => L2Param(
       ways = 4,
       sets = 256,
-      clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
+      clientCaches = Seq(L1Param(
+        aliasBitsOpt = Some(2),
+        // vaddrBitsOpt = Some(36),
+        // isKeywordBitsOpt = Some(true)
+      )),
+      // reqField = Seq(utility.ReqSourceField()),
+      // echoField = Seq(huancun.DirtyField()),
+      // tagECC = Some("secded"),
+      // dataECC = Some("secded"),
+      // enableTagECC = true,
+      // enableDataECC = true,
+      dataCheck = Some("none"), // TODO:
+      enablePoison = false, // TODO: 
+
       enablePerf = false, 
       enableRollingDB = false,
       enableMonitor = false,
@@ -335,7 +420,8 @@ object TestTopForUT extends App {
       elaboratedTopDown = false, 
       FPGAPlatform = false,
       splitFlit = false,
-      dataCheck = Some("none")
+
+      // prefetch = Seq(BOPParameters()),
     )
     case CHIIssue => if(isReleaseRTL) "B" else "E.b"
   })
@@ -345,7 +431,8 @@ object TestTopForUT extends App {
         new TestTopForUT( 
             numCores = 1,
             numULAgents = 1,
-            banks = if(isReleaseRTL) 4 else 1
+            banks = if(isReleaseRTL) 4 else 1,
+            isMMIOBridgeTop
         )(p)
     )
   )(config)

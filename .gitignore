@@ -7,3 +7,5 @@ build/
 .bloop/
 .metals/
 .vscode/
+xs-issue-b-difftest-verilog/
+gen/
