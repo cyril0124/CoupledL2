@@ -208,8 +208,19 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1, mmio
   val bankBinders = (0 until numCores).map(_ => BankBinder(banks, 64))
 
   var mmioClientNodes: Seq[TLClientNode] = Nil
+  var cmoClientNodes: Seq[TLClientNode] = Nil
   l1d_nodes.zip(l2_nodes).zipWithIndex.foreach { case ((l1d, l2), i) =>
     val l1xbar = TLXbar()
+
+    val cmoClientNode = TLClientNode(Seq(
+      TLMasterPortParameters.v1(
+        clients = Seq(TLMasterParameters.v1(
+          name = "cmo",
+          sourceId = IdRange(0, 7),
+        )),
+        requestFields = Nil
+      )
+    ))
 
     l1xbar := 
       TLLogger(s"L2_L1_CORE${i}_TLC", !cacheParams.FPGAPlatform && cacheParams.enableTLLog) := 
@@ -220,6 +231,10 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1, mmio
         TLLogger(s"L2_L1_CORE${i}_TLUL${j}", !cacheParams.FPGAPlatform && cacheParams.enableTLLog) :=
         TLBuffer() := l1i
     }
+
+    l1xbar := 
+      TLLogger(s"L2_L1_CORE${i}_TLC", !cacheParams.FPGAPlatform && cacheParams.enableTLLog) := 
+      TLBuffer() := cmoClientNode
     
     l2.managerNode :=
       TLXbar() :=*
@@ -238,6 +253,7 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1, mmio
     ))
 
     mmioClientNodes = mmioClientNodes ++ Seq(mmioClientNode)
+    cmoClientNodes = cmoClientNodes ++ Seq(cmoClientNode)
 
     l2.mmioBridge.mmioNode := mmioClientNode
   }
@@ -260,6 +276,10 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1, mmio
 
     mmioClientNodes.zipWithIndex.foreach { case(node, i) =>
       node.makeIOs()(ValName(s"mmioBridge_${i}_"))
+    }
+
+    cmoClientNodes.zipWithIndex.foreach { case(node, i) =>
+      node.makeIOs()(ValName(s"cmo_${i}_"))
     }
 
     val io = IO(new Bundle {
