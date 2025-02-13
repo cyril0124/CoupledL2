@@ -443,7 +443,7 @@ object TestTopForUT extends App {
 
       // prefetch = Seq(BOPParameters()),
     )
-    case CHIIssue => if(isReleaseRTL) "B" else "E.b"
+    case CHIIssue => if(isReleaseRTL) "E.b" else "E.b"
   })
 
   val top = DisableMonitors(

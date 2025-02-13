@@ -2,17 +2,17 @@
 
 set -e
 
-# RELEASE_RTL=1 make test-top-ut
-RELEASE_RTL=1 MMIOBRIDGE_TOP=1 make test-top-ut
+RELEASE_RTL=1 make test-top-ut-release
+# RELEASE_RTL=1 MMIOBRIDGE_TOP=1 make test-top-ut
 
-rtl_dir=$(pwd)/build/TestTop
+rtl_dir=$(pwd)/build/release/TestTop
 gen_dir=$(pwd)/gen
 mkdir -p $gen_dir
 
 cp $rtl_dir/*.v $gen_dir
 rm $gen_dir/ClockGate.v
 
-cp $(pwd)/xs-issue-b-difftest-verilog/rtl $gen_dir -r
+cp $(pwd)/xs-issue-e-b-difftest-verilog/rtl $gen_dir -r
 
 # Replace
 sed -i 's/TL2CHICoupledL2/bosc_TL2CHICoupledL2/g' $gen_dir/TestTop.v
@@ -38,10 +38,10 @@ sed -i '/\.io_l2_tlb_req_pmp_resp_st.*/d' $gen_dir/TestTop.v
 sed -i '/\.io_l2_tlb_req_pmp_resp_instr.*/d' $gen_dir/TestTop.v
 sed -i '/\.io_l2_tlb_req_pmp_resp_atomic.*/d' $gen_dir/TestTop.v
 
-
 # Append
 sed -i '/\.auto_in_0_a_bits_echo_isKeyword(l2_nodes_auto_in_0_a_bits_echo_isKeyword),/a .auto_in_0_a_bits_user_reqSource(0),' $gen_dir/TestTop.v
 sed -i '/\.auto_in_1_a_bits_echo_isKeyword(l2_nodes_auto_in_1_a_bits_echo_isKeyword),/a .auto_in_1_a_bits_user_reqSource(0),' $gen_dir/TestTop.v
 sed -i '/\.auto_in_2_a_bits_echo_isKeyword(l2_nodes_auto_in_2_a_bits_echo_isKeyword),/a .auto_in_2_a_bits_user_reqSource(0),' $gen_dir/TestTop.v
 sed -i '/\.auto_in_3_a_bits_echo_isKeyword(l2_nodes_auto_in_3_a_bits_echo_isKeyword),/a .auto_in_3_a_bits_user_reqSource(0),' $gen_dir/TestTop.v
 
+echo "gen.sh Finish"

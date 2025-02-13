@@ -8,4 +8,5 @@ build/
 .metals/
 .vscode/
 xs-issue-b-difftest-verilog/
+xs-issue-e-b-difftest-verilog/
 gen/
