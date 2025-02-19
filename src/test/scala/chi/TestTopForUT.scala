@@ -149,6 +149,18 @@ class SimpleEndpointCHI()(implicit p: Parameters) extends TL2CHIL2Module {
     dontTouch(io)
 }
 
+class CHIEmptyShell(splitFlit: Boolean)(implicit p: Parameters) extends  TL2CHIL2Module {
+  val io = IO(new Bundle {
+    val chiIn = Flipped(new PortIO(splitFlit = splitFlit))
+    val chiOut = new PortIO(splitFlit = splitFlit)
+  })
+
+  io.chiIn <> io.chiOut
+  dontTouch(io)
+  dontTouch(clock)
+  dontTouch(reset)
+}
+
 class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1, mmioBridgeTop: Boolean = false)(implicit p: Parameters) extends LazyModule
   with HasCHIMsgParameters {
 
@@ -304,17 +316,20 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1, mmio
         }
       } else {
         if(!mmioBridgeTop) {
-          chiEndpoint.get.io.chi.rxsactive <> l2.module.io_chi.rxsactive
-          chiEndpoint.get.io.chi.txsactive <> l2.module.io_chi.txsactive
-          chiEndpoint.get.io.chi.syscoack <> l2.module.io_chi.syscoack
-          chiEndpoint.get.io.chi.syscoreq <> l2.module.io_chi.syscoreq
-          chiEndpoint.get.io.chi.tx.linkactiveack <> l2.module.io_chi.tx.linkactiveack
-          chiEndpoint.get.io.chi.tx.linkactivereq <> l2.module.io_chi.tx.linkactivereq
-          chiEndpoint.get.io.chi.rx.linkactiveack <> l2.module.io_chi.rx.linkactiveack
-          chiEndpoint.get.io.chi.rx.linkactivereq <> l2.module.io_chi.rx.linkactivereq
+          val chiEmptyShell = Module(new CHIEmptyShell(p(L2ParamKey).splitFlit))
+          chiEmptyShell.io.chiIn <> l2.module.io_chi
+
+          chiEndpoint.get.io.chi.rxsactive <> chiEmptyShell.io.chiOut.rxsactive
+          chiEndpoint.get.io.chi.txsactive <> chiEmptyShell.io.chiOut.txsactive
+          chiEndpoint.get.io.chi.syscoack <> chiEmptyShell.io.chiOut.syscoack
+          chiEndpoint.get.io.chi.syscoreq <> chiEmptyShell.io.chiOut.syscoreq
+          chiEndpoint.get.io.chi.tx.linkactiveack <> chiEmptyShell.io.chiOut.tx.linkactiveack
+          chiEndpoint.get.io.chi.tx.linkactivereq <> chiEmptyShell.io.chiOut.tx.linkactivereq
+          chiEndpoint.get.io.chi.rx.linkactiveack <> chiEmptyShell.io.chiOut.rx.linkactiveack
+          chiEndpoint.get.io.chi.rx.linkactivereq <> chiEmptyShell.io.chiOut.rx.linkactivereq
 
           val in_rx = chiEndpoint.get.io.chi.rx
-          val out_rx = l2.module.io_chi.rx
+          val out_rx = chiEmptyShell.io.chiOut.rx
 
           in_rx.rsp.flitpend <> out_rx.rsp.flitpend
           in_rx.rsp.flitv <> out_rx.rsp.flitv
@@ -341,7 +356,7 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1, mmio
 
 
           val in_tx = chiEndpoint.get.io.chi.tx
-          val out_tx = l2.module.io_chi.tx
+          val out_tx = chiEmptyShell.io.chiOut.tx
           in_tx.req.flitpend <> out_tx.req.flitpend
           in_tx.req.flitv <> out_tx.req.flitv
           in_tx.req.lcrdv <> out_tx.req.lcrdv
