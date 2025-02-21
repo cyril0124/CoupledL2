@@ -67,12 +67,15 @@ test-top-chi-quadcore-2ul:
 
 test-top-ut:
 	mill -i CoupledL2.test.runMain coupledL2.TestTopForUT -td $(BUILD_DIR)/TestTop --target systemverilog --split-verilog
+	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(BUILD_DIR)/TestTop/TestTop.sv.conf" "$(BUILD_DIR)/TestTop"
 
 test-top-ut-release:
 	mill -i CoupledL2.test.runMain coupledL2.TestTopForUT -td $(BUILD_DIR)/release/TestTop --target systemverilog --split-verilog
+	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(BUILD_DIR)/TestTop/TestTop.sv.conf" "$(BUILD_DIR)/TestTop"
 
 test-top-ut-mmio:
 	mill -i CoupledL2.test.runMain coupledL2.MMIOBridgeTop -td $(BUILD_DIR)/MMIOBridgeTop --target systemverilog --split-verilog
+	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(BUILD_DIR)/TestTop/TestTop.sv.conf" "$(BUILD_DIR)/TestTop"
 
 clean:
 	rm -rf ./build
