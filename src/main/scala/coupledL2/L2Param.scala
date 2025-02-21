@@ -126,7 +126,8 @@ case class L2Param(
   sam: Seq[(AddressSet, Int)] = Seq(AddressSet.everything -> 0),
 
   // Split chi flit into multiple fields
-  splitFlit: Boolean = false
+  splitFlit: Boolean = false,
+  hasMbist:Boolean = false
 ) {
   def toCacheParams: CacheParameters = CacheParameters(
     name = name,
