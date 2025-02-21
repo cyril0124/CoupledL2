@@ -66,13 +66,13 @@ test-top-chi-quadcore-2ul:
 	$(MAKE) gen-test-top-chi SYSTEM=CHIL2 $(CHI_PASS_ARGS) NUM_CORE=4 NUM_TL_UL=2
 
 test-top-ut:
-	mill -i CoupledL2.test.runMain coupledL2.TestTopForUT -td $(BUILD_DIR)/TestTop -e verilog
+	mill -i CoupledL2.test.runMain coupledL2.TestTopForUT -td $(BUILD_DIR)/TestTop --target systemverilog --split-verilog
 
 test-top-ut-release:
-	mill -i CoupledL2.test.runMain coupledL2.TestTopForUT -td $(BUILD_DIR)/release/TestTop -e verilog
+	mill -i CoupledL2.test.runMain coupledL2.TestTopForUT -td $(BUILD_DIR)/release/TestTop --target systemverilog --split-verilog
 
 test-top-ut-mmio:
-	mill -i CoupledL2.test.runMain coupledL2.MMIOBridgeTop -td $(BUILD_DIR)/MMIOBridgeTop -e verilog --no-dce
+	mill -i CoupledL2.test.runMain coupledL2.MMIOBridgeTop -td $(BUILD_DIR)/MMIOBridgeTop --target systemverilog --split-verilog
 
 clean:
 	rm -rf ./build

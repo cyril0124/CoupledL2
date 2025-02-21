@@ -1,9 +1,10 @@
 package coupledL2
 
 import chisel3._
+import circt.stage.ChiselStage
 import chisel3.util._
 import org.chipsalliance.cde.config._
-import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
+import chisel3.stage.ChiselGeneratorAnnotation
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tile.MaxHartIdBits
@@ -472,7 +473,7 @@ object TestTopForUT extends App {
     )
   )(config)
 
-  (new ChiselStage).execute(args, Seq(ChiselGeneratorAnnotation(() => top.module)))
+  (new ChiselStage).execute(args, ChiselGeneratorAnnotation(() => top.module) +: TestTopFirtoolOptions())
 }
 
 object MMIOBridgeTop extends App {
@@ -500,5 +501,5 @@ object MMIOBridgeTop extends App {
     )
   )(config)
 
-  (new ChiselStage).execute(args, Seq(ChiselGeneratorAnnotation(() => top.module)))
+(new ChiselStage).execute(args, ChiselGeneratorAnnotation(() => top.module) +: TestTopFirtoolOptions())
 }
