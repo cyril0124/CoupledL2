@@ -215,7 +215,7 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1, mmio
     case CHIIssue => p(CHIIssue)
     case BankBitsKey => log2Ceil(banks)
     case MaxHartIdBits => log2Up(numCores)
-    case PerfCounterOptionsKey => PerfCounterOptions(false, false, 0)
+    case PerfCounterOptionsKey => PerfCounterOptions(false, false, XSPerfLevel.withName("VERBOSE"), 0)
   }))))
 
   val bankBinders = (0 until numCores).map(_ => BankBinder(banks, 64))
