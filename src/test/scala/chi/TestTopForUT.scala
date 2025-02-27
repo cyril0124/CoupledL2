@@ -220,8 +220,12 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1, mmio
 
   val bankBinders = (0 until numCores).map(_ => BankBinder(banks, 64))
 
+  val hasReceiver = p(L2ParamKey).prefetch.exists(_.isInstanceOf[PrefetchReceiverParams])
+
   var mmioClientNodes: Seq[TLClientNode] = Nil
   var cmoClientNodes: Seq[TLClientNode] = Nil
+  var pfSources: Seq[BundleBridgeSource[_ >: coupledL2.PrefetchRecv]] = Nil
+
   l1d_nodes.zip(l2_nodes).zipWithIndex.foreach { case ((l1d, l2), i) =>
     val l1xbar = TLXbar()
 
@@ -269,6 +273,12 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1, mmio
     cmoClientNodes = cmoClientNodes ++ Seq(cmoClientNode)
 
     l2.mmioBridge.mmioNode := mmioClientNode
+
+    if(hasReceiver) {
+      val l2_pf_sender = BundleBridgeSource(() => new coupledL2.PrefetchRecv)
+      l2.pf_recv_node.get := l2_pf_sender
+      pfSources = pfSources ++ Seq(l2_pf_sender)
+    }
   }
 
   lazy val module = new LazyModuleImp(this){
@@ -298,6 +308,10 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1, mmio
     val io = IO(new Bundle {
       val chi = if(mmioBridgeTop) Some(new DecoupledPortIO) else None
     })
+
+    pfSources.zipWithIndex.foreach {
+      case(pfSource, i) => pfSource.makeIOs()(ValName(s"pfSource_${i}_"))
+    }
 
     l2_nodes.zipWithIndex.foreach { case (l2, i) =>
       dontTouch(l2.module.io)
@@ -391,6 +405,13 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1, mmio
       l2.module.io.pfCtrlFromCore := DontCare
       l2.module.io.l2_tlb_req <> DontCare
 
+      val pfCtrlFromCore = l2.module.io.pfCtrlFromCore
+      pfCtrlFromCore.l2_pf_master_en := true.B
+      pfCtrlFromCore.l2_pf_recv_en := true.B
+      pfCtrlFromCore.l2_pbop_en := true.B
+      pfCtrlFromCore.l2_vbop_en := true.B
+      pfCtrlFromCore.l2_tp_en := false.B
+
       dontTouch(l2.module.io_nodeID)
     }
   }
@@ -437,7 +458,7 @@ object TestTopForUT extends App {
       sets = 256,
       clientCaches = Seq(L1Param(
         aliasBitsOpt = Some(2),
-        // vaddrBitsOpt = Some(36),
+        vaddrBitsOpt = Some(36),
         // isKeywordBitsOpt = Some(true)
       )),
       // reqField = Seq(utility.ReqSourceField()),
@@ -457,7 +478,7 @@ object TestTopForUT extends App {
       FPGAPlatform = false,
       splitFlit = false,
 
-      // prefetch = Seq(BOPParameters()),
+      prefetch = Seq(BOPParameters(virtualTrain = false /* TODO: true */), PrefetchReceiverParams()),
     )
     case CHIIssue => if(isReleaseRTL) "E.b" else "E.b"
   })
