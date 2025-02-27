@@ -213,6 +213,76 @@ class RecentRequestTable(name: String)(implicit p: Parameters) extends BOPModule
 
 }
 
+class EnvConstValueHelper(envName: String, initValue: BigInt, bitWidth: Int) extends BlackBox with HasBlackBoxInline {
+  private val MAX_BITS = 64
+  require(bitWidth <= MAX_BITS, s"[EnvConstValueHelper] [$envName] bitWidth $bitWidth > $MAX_BITS")
+  println(s"[EnvConstValueHelper] envName: $envName, initValue: $initValue, bitWidth: $bitWidth")
+
+  val io = IO(new Bundle{
+    val value = Output(UInt(MAX_BITS.W))
+  })
+
+  val verilog =
+    s"""
+       |module EnvConstValueHelper__$envName(
+       |  output reg [$bitWidth - 1:0] value
+       |);
+       |
+       |`ifdef SYNTHESIS
+       |  initial value = $initValue; // Default value
+       |`else // SYNTHESIS
+       | `ifndef VERILATOR
+       |    import "DPI-C" function string getenv(input string env_name);
+       |
+       |    function integer getenv_integer(input string env_name);
+       |        integer result;
+       |        if(getenv(env_name) == "") begin
+       |            return $initValue; // Default value
+       |        end else begin
+       |            $$sscanf(getenv(env_name), "%d", result);
+       |            return result;
+       |        end
+       |    endfunction
+       | `else // VERILATOR
+       |    `systemc_header
+       |        #include <iostream>
+       |        #include <cstdlib>
+       |        #include <cassert>
+       |    `systemc_interface
+       |        unsigned int getenv_integer(std::string env_name) {
+       |            const char *value = getenv(env_name.c_str());
+       |            if (value == nullptr) {
+       |                std::cout << "enviroment variable [" << env_name << "] is not set!" << std::endl;
+       |                return $initValue; // Default value
+       |            } else {
+       |                return std::stoul(std::string(value));
+       |            }
+       |        }
+       |    `verilog
+       |
+       |    function integer getenv_integer(input string env_name);
+       |        return $$c("this->getenv_integer(", env_name, ")");
+       |    endfunction
+       | `endif
+       |  initial begin
+       |    value = getenv_integer("$envName");
+       |    $$display("[EnvConstValueHelper] set constEnvValue: `$envName` to `%d`", value);
+       |  end
+       |`endif
+       |endmodule
+       |""".stripMargin
+  setInline(s"EnvConstValueHelper__$envName.sv", verilog)
+
+  override def desiredName: String = s"EnvConstValueHelper__$envName"
+}
+
+object EnvConstValue {
+  def apply(envName: String, initValue: BigInt, bitWidth: Int) = {
+    val helper = Module(new EnvConstValueHelper(envName, initValue, bitWidth))
+    helper.io.value
+  }
+}
+
 class OffsetScoreTable(name: String = "")(implicit p: Parameters) extends BOPModule {
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(UInt(fullAddrBits.W)))
@@ -221,8 +291,8 @@ class OffsetScoreTable(name: String = "")(implicit p: Parameters) extends BOPMod
     val test = new TestOffsetBundle
   })
 
-  private val badscoreConstant = Constantin.createRecord(name+"_badScore", bopParams.badScore)
-  private val roundMaxConstant = Constantin.createRecord(name+"_roundMax", roundMax)
+  private val badscoreConstant = EnvConstValue(name+"_badScore", bopParams.badScore, 64)
+  private val roundMaxConstant = EnvConstValue(name+"_roundMax", roundMax, roundBits)
 
   val prefetchOffset = RegInit(2.U(offsetWidth.W))
   val prefetchDisable = RegInit(false.B)
