@@ -446,7 +446,7 @@ object TestTopForUT extends App {
       // dataECC = Some("secded"),
       // enableTagECC = true,
       // enableDataECC = true,
-      dataCheck = Some("none"), // TODO:
+      dataCheck = Some("oddparity"),
       enablePoison = false, // TODO: 
 
       enablePerf = false, 
