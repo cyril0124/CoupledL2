@@ -288,6 +288,7 @@ class LinkMonitor(splitFlit: Boolean = false)(implicit p: Parameters) extends L2
     val in = Flipped(new DecoupledPortIO())
     val out = new PortIO(splitFlit = splitFlit)
     val nodeID = Input(UInt(NODEID_WIDTH.W))
+    val exitco = Option.when(cacheParams.enableL2Flush) (Input(Bool()))
   })
   // val s_stop :: s_activate :: s_run :: s_deactivate :: Nil = Enum(4)
 
@@ -319,8 +320,9 @@ class LinkMonitor(splitFlit: Boolean = false)(implicit p: Parameters) extends L2
     next = RegNext(io.out.rx.linkactivereq) || !rxDeact,
     init = false.B
   )
-
-  io.out.syscoreq := true.B
+  //exit coherecy + deactive tx/rx when l2 flush done
+  val exitco = io.exitco.getOrElse(false.B)
+  io.out.syscoreq := !exitco
 
   val retryAckCnt = RegInit(0.U(64.W))
   val pCrdGrantCnt = RegInit(0.U(64.W))
