@@ -1,7 +1,7 @@
 package coupledL2
 
 import chisel3._
-import circt.stage.ChiselStage
+import circt.stage.{ChiselStage, FirtoolOption}
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import chisel3.stage.ChiselGeneratorAnnotation
@@ -307,6 +307,13 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1, mmio
 
     val io = IO(new Bundle {
       val chi = if(mmioBridgeTop) Some(new DecoupledPortIO) else None
+      val l2_tlb_req = if(p(L2ParamKey).prefetch.isEmpty) None else Some(Vec(l2_nodes.size, new Bundle {
+        val req = DecoupledIO(new L2TlbReq)
+        val req_kill = Output(Bool())
+        val resp = Flipped(Decoupled(new L2TlbResp_1(1)))
+        val pmp_resp = Flipped(new PMPRespBundle())
+      }))
+      val pfCtrlFromCore = if(p(L2ParamKey).prefetch.isEmpty) None else Some(Vec(l2_nodes.size, Input(new PrefetchCtrlFromCore)))
     })
 
     pfSources.zipWithIndex.foreach {
@@ -315,6 +322,35 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1, mmio
 
     l2_nodes.zipWithIndex.foreach { case (l2, i) =>
       dontTouch(l2.module.io)
+
+      l2.module.io.hartId := i.U
+      l2.module.io_nodeID := i.U(NODEID_WIDTH.W)
+      l2.module.io.debugTopDown := DontCare
+      l2.module.io.pfCtrlFromCore := DontCare
+
+      io.pfCtrlFromCore.foreach { pf =>
+        val l2_pfCtrlFromCore = pf(i)
+        l2.module.io.pfCtrlFromCore := l2_pfCtrlFromCore
+      }
+
+      io.l2_tlb_req.foreach { l2_tlb_reqs =>
+        val l2_tlb_req = l2_tlb_reqs(i)
+        dontTouch(l2_tlb_req)
+        l2_tlb_req.req <> l2.module.io.l2_tlb_req.req
+        l2_tlb_req.req_kill <> l2.module.io.l2_tlb_req.req_kill
+        l2_tlb_req.pmp_resp <> l2.module.io.l2_tlb_req.pmp_resp
+
+        val resp = l2.module.io.l2_tlb_req.resp
+        resp.valid := l2_tlb_req.resp.valid
+        resp.bits.paddr.head := l2_tlb_req.resp.bits.paddr.head
+        resp.bits.pbmt := l2_tlb_req.resp.bits.pbmt
+        resp.bits.miss := l2_tlb_req.resp.bits.miss
+        resp.bits.excp.head.gpf := l2_tlb_req.resp.bits.excp.head.gpf
+        resp.bits.excp.head.pf := l2_tlb_req.resp.bits.excp.head.pf
+        resp.bits.excp.head.af := l2_tlb_req.resp.bits.excp.head.af
+
+        l2_tlb_req.resp.ready := resp.ready
+      }
 
       val chiEndpoint = if(!mmioBridgeTop) Some(Module(new SimpleEndpointCHI())) else None
       val reverseLinkMonitor = if(mmioBridgeTop) Some(Module(new ReverseLinkMonitor(splitFlit = p(L2ParamKey).splitFlit))) else None
@@ -399,19 +435,6 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1, mmio
         }
       }
 
-      l2.module.io.hartId := i.U
-      l2.module.io_nodeID := i.U(NODEID_WIDTH.W)
-      l2.module.io.debugTopDown := DontCare
-      l2.module.io.pfCtrlFromCore := DontCare
-      l2.module.io.l2_tlb_req <> DontCare
-
-      val pfCtrlFromCore = l2.module.io.pfCtrlFromCore
-      pfCtrlFromCore.l2_pf_master_en := true.B
-      pfCtrlFromCore.l2_pf_recv_en := true.B
-      pfCtrlFromCore.l2_pbop_en := true.B
-      pfCtrlFromCore.l2_vbop_en := true.B
-      pfCtrlFromCore.l2_tp_en := false.B
-
       dontTouch(l2.module.io_nodeID)
     }
   }
@@ -478,7 +501,7 @@ object TestTopForUT extends App {
       FPGAPlatform = false,
       splitFlit = false,
 
-      prefetch = Seq(BOPParameters(virtualTrain = false /* TODO: true */), PrefetchReceiverParams()),
+      prefetch = Seq(BOPParameters(virtualTrain = true), PrefetchReceiverParams()),
     )
     case CHIIssue => if(isReleaseRTL) "E.b" else "E.b"
   })

@@ -412,6 +412,17 @@ class L2TlbResp(nDups: Int = 1)(implicit p: Parameters) extends L2Bundle {
   })
 }
 
+class L2TlbResp_1(nDups: Int = 1)(implicit p: Parameters) extends L2Bundle {
+  val paddr = Vec(nDups, Output(UInt(64.W)))
+  val pbmt = Output(Pbmt.apply())
+  val miss = Output(Bool())
+  val excp = Vec(nDups, new Bundle {
+    val gpf = new TlbExceptionBundle()
+    val pf = new TlbExceptionBundle()
+    val af = new TlbExceptionBundle()
+  })
+}
+
 class PMPRespBundle(implicit p: Parameters) extends L2Bundle {
   val ld = Output(Bool())
   val st = Output(Bool())

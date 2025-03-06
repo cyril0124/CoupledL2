@@ -669,7 +669,7 @@ private[coupledL2] object TestTopFirtoolOptions {
     FirtoolOption("--disable-annotation-unknown"),
     FirtoolOption("--repl-seq-mem"),
     FirtoolOption("--repl-seq-mem-file=TestTop.sv.conf"),
-    FirtoolOption("--lowering-options=explicitBitcast")
+    FirtoolOption("--lowering-options=explicitBitcast, emittedLineLength=120")
   )
 }
 
