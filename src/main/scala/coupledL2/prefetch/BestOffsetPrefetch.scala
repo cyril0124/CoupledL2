@@ -225,11 +225,15 @@ class EnvConstValueHelper(envName: String, initValue: BigInt, bitWidth: Int) ext
   val verilog =
     s"""
        |module EnvConstValueHelper__$envName(
+       |`ifdef SYNTHESIS
+       |  output wire [$bitWidth - 1:0] value
+       |`else
        |  output reg [$bitWidth - 1:0] value
+       |`endif
        |);
        |
        |`ifdef SYNTHESIS
-       |  initial value = $initValue; // Default value
+       |  assign value = $initValue; // Default value
        |`else // SYNTHESIS
        | `ifndef VERILATOR
        |    import "DPI-C" function string getenv(input string env_name);
