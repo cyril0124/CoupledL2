@@ -69,13 +69,17 @@ test-top-ut:
 	mill -i CoupledL2.test.runMain coupledL2.TestTopForUT -td $(BUILD_DIR)/TestTop --target systemverilog --split-verilog
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(BUILD_DIR)/TestTop/TestTop.sv.conf" "$(BUILD_DIR)/TestTop"
 
+test-top-ut-set2-way4-mshr4:
+	SETS=2 WAYS=4 MSHRS=4 mill -i CoupledL2.test.runMain coupledL2.TestTopForUT -td $(BUILD_DIR)/TestTopSet2Way4Mshr4 --target systemverilog --split-verilog
+	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(BUILD_DIR)/TestTopSet2Way4Mshr4/TestTop.sv.conf" "$(BUILD_DIR)/TestTopSet2Way4Mshr4"
+
 test-top-ut-release:
 	mill -i CoupledL2.test.runMain coupledL2.TestTopForUT -td $(BUILD_DIR)/release/TestTop --target systemverilog --split-verilog
-	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(BUILD_DIR)/TestTop/TestTop.sv.conf" "$(BUILD_DIR)/TestTop"
+	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(BUILD_DIR)/release/TestTop/TestTop.sv.conf" "$(BUILD_DIR)/release/TestTop"
 
 test-top-ut-mmio:
 	mill -i CoupledL2.test.runMain coupledL2.MMIOBridgeTop -td $(BUILD_DIR)/MMIOBridgeTop --target systemverilog --split-verilog
-	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(BUILD_DIR)/TestTop/TestTop.sv.conf" "$(BUILD_DIR)/TestTop"
+	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(BUILD_DIR)/MMIOBridgeTop/TestTop.sv.conf" "$(BUILD_DIR)/MMIOBridgeTop/TestTop"
 
 clean:
 	rm -rf ./build

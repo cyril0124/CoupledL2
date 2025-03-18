@@ -469,16 +469,20 @@ class MMIOBridgeTop()(implicit p: Parameters) extends LazyModule {
 
 object TestTopForUT extends App {
 
+  val ENV_WAYS = sys.env.getOrElse("WAYS", "4").toInt
+  val ENV_SETS = sys.env.getOrElse("SETS", "256").toInt
+  val ENV_MSHRS = sys.env.getOrElse("MSHRS", "16").toInt
   val isMMIOBridgeTop = sys.env.getOrElse("MMIOBRIDGE_TOP", "0") == "1"
   val isReleaseRTL = sys.env.getOrElse("RELEASE_RTL", "0") == "1"
-  println(s"isMMIOBridgeTop: $isMMIOBridgeTop, isReleaseRTL: $isReleaseRTL")
+  println(s"ENV_WAYS: $ENV_WAYS, ENV_SETS: $ENV_SETS, ENV_MSHRS: $ENV_MSHRS, isMMIOBridgeTop: $isMMIOBridgeTop, isReleaseRTL: $isReleaseRTL")
 
   Constantin.init(false)
 
   val config = new Config((_, _, _) => {
     case L2ParamKey => L2Param(
-      ways = 4,
-      sets = 256,
+      ways = ENV_WAYS,
+      sets = ENV_SETS,
+      mshrs = ENV_MSHRS,
       clientCaches = Seq(L1Param(
         aliasBitsOpt = Some(2),
         vaddrBitsOpt = Some(36),
