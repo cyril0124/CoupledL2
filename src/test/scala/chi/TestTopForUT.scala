@@ -165,6 +165,8 @@ class CHIEmptyShell(splitFlit: Boolean)(implicit p: Parameters) extends  TL2CHIL
 class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1, mmioBridgeTop: Boolean = false)(implicit p: Parameters) extends LazyModule
   with HasCHIMsgParameters {
 
+  val isReleaseRTL = sys.env.getOrElse("RELEASE_RTL", "0") == "1"
+
   assert(numCores == 1)
 
   override lazy val desiredName: String = "TestTop"
@@ -192,14 +194,14 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1, mmio
     masterNode
   }
 
-  val l1d_nodes = (0 until numCores).map(i => createClientNode(s"l1d$i", 64))
+  val l1d_nodes = (0 until numCores).map(i => createClientNode(s"l1d$i", if(isReleaseRTL) 16 else 64))
   val l1i_nodes = (0 until numCores).map {i =>
     (0 until numULAgents).map { j =>
       TLClientNode(Seq(
         TLMasterPortParameters.v1(
           clients = Seq(TLMasterParameters.v1(
             name = s"l1i${i}_${j}",
-            sourceId = IdRange(0, 63)
+            sourceId = IdRange(0, (if(isReleaseRTL) 16 else 64) - 1)
           ))
         )
       ))
@@ -233,7 +235,7 @@ class TestTopForUT(numCores: Int = 1, numULAgents: Int = 1, banks: Int = 1, mmio
       TLMasterPortParameters.v1(
         clients = Seq(TLMasterParameters.v1(
           name = "cmo",
-          sourceId = IdRange(0, 7),
+          sourceId = IdRange(0, 8 - 1),
         )),
         requestFields = Nil
       )
