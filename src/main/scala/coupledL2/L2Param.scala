@@ -129,7 +129,10 @@ case class L2Param(
 
   // Split chi flit into multiple fields
   splitFlit: Boolean = false,
-  hasMbist:Boolean = false
+
+  // Enable sram test support
+  hasMbist: Boolean = false,
+  hasSramCtl: Boolean = false
 ) {
   def toCacheParams: CacheParameters = CacheParameters(
     name = name,
@@ -141,6 +144,8 @@ case class L2Param(
 
   def tagCode: Code = Code.fromString(tagECC)
   def dataCode: Code = Code.fromString(dataECC)
+
+  def hasSramTest: Boolean = hasMbist || hasSramCtl
 }
 
 case object L2ParamKey extends Field[L2Param](L2Param())
