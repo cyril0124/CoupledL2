@@ -12,7 +12,7 @@ mkdir -p $gen_dir
 
 cp $rtl_dir/*.sv $gen_dir
 cp $rtl_dir/*.v $gen_dir
-rm $gen_dir/ClockGate.v
+rm $gen_dir/ClockGate.sv
 
 set -e
 
